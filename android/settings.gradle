@@ -21,7 +21,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   }
 }
 
-rootProject.name = 'hongsi'
+rootProject.name = '김연주T 과학'
 
 dependencyResolutionManagement {
   versionCatalogs {

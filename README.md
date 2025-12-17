@@ -50,6 +50,7 @@ cd android
 ./gradlew assembleRelease
 ```
 6. 만약 eas 를 쓴다면, git commit 후 ```eas build -p android --profile preview``` 명령어 사용.
+7. release SHA1 - 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
 
 ## ios용 파일 굽기
 1. ```eas build --platform ios --profile preview``` 명령어 실행
