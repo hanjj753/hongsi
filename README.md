@@ -51,6 +51,9 @@ cd android
 ```
 6. 만약 eas 를 쓴다면, git commit 후 ```eas build -p android --profile preview``` 명령어 사용.
 
+## ios용 파일 굽기
+1. ```eas build --platform ios --profile preview``` 명령어 실행
+
 ## 웹 화면 보기
 1. 아래 명령어를 실행
 ```bash
@@ -63,3 +66,11 @@ https://script.google.com/macros/s/AKfycbyBOydGHWawsHqZag_csfwITbMixWaTAyK3qMIz0
 ## 앱 이름 변경
 1. app.json에서 {expo : {"name": ""}} 부분을 직접 변경
 2. android/app/src/main/res/values/strings.xml에서 <string name="app_name">에 있는 내용 변경
+
+## 아이콘 넣기
+- https://icons.expo.fyi/Index 사이트에서 아이콘 찾기
+- 아래 내용 추가
+```bash
+import { FontAwesome } from '@expo/vector-icons';
+<FontAwesome name="google" size={24} color="black" />
+```

@@ -1,4 +1,4 @@
-package com.hongsi.smssender;
+package com.hongsi.assistant;
 
 import android.telephony.SmsManager;
 import com.facebook.react.bridge.ReactApplicationContext;

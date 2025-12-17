@@ -22,7 +22,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.hongsi.assistant"
+      "package": "com.hongsi.assistant",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro",
@@ -45,7 +46,16 @@
             "buildToolsVersion": "35.0.0"
           }
         }
-      ]
-    ]
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "f43d139a-76cf-4757-9cc0-50e9e42801b2"
+      }
+    }
   }
 }

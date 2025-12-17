@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "804211566696",
+    "project_id": "hongsi-assistant",
+    "storage_bucket": "hongsi-assistant.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:804211566696:android:2a3f472b55d670747af3dd",
+        "android_client_info": {
+          "package_name": "com.hongsi.assistant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAn0bVQp__YrBZRaLikxEvr4sxe0HGhUOM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
