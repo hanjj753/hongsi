@@ -1,40 +1,116 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; // 아이콘 사용
 
+import auth from '@react-native-firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged as onWebAuthStateChanged } from 'firebase/auth';
+import { webAuth } from '../firebaseConfig';
+
 export default function LoginScreen() {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    // 나중에 실제 구글 로그인 로직이 들어갈 곳
-    console.log("구글 로그인 시도...");
-    
-    // 로그인 성공 시 탭 화면으로 이동 (replace는 뒤로가기 방지)
-    router.replace('/(tabs)');
-  };
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // [Web] 웹용 로그인 상태 감지
+      const unsubscribe = onWebAuthStateChanged(webAuth, (user) => {
+        if (user) router.replace('/(tabs)');
+      });
+      return () => unsubscribe();
+    } else {
+      // [App] 앱용 구글 로그인 설정 & 상태 감지
+      GoogleSignin.configure({
+        webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
+      });
+
+      const subscriber = auth().onAuthStateChanged((user) => {
+        if (user) router.replace('/(tabs)');
+      });
+      return subscriber;
+    }
+  }, []);
+
+  async function onGoogleButtonPress() {
+    if (loading) return;
+    setLoading(true);
+
+    try {
+      if (Platform.OS === 'web') {
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(webAuth, provider);
+        
+      } else {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        const response = await GoogleSignin.signIn();
+        const idToken = response.data?.idToken || response.idToken;
+
+        if (!idToken) throw new Error('Google ID Token 없음');
+
+        const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+        await auth().signInWithCredential(googleCredential);
+      }
+
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'SIGN_IN_CANCELLED') {
+        // 사용자가 창 닫음 (무시)
+      } else {
+        Alert.alert('로그인 실패', error.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <View style={styles.container}>
-      <Ionicons name="logo-google" size={50} color="#DB4437" style={{ marginBottom: 20 }} />
-      <Text style={styles.title}>로그인</Text>
+      <Ionicons name="logo-google" size={60} color="#DB4437" style={{ marginBottom: 20 }} />
+      <Text style={styles.title}>김연주T 과학 로그인</Text>
       
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Google 계정으로 로그인</Text>
+      <TouchableOpacity 
+        style={styles.button} 
+        onPress={onGoogleButtonPress}
+        disabled={loading}
+      >
+        {loading ? (
+          <ActivityIndicator color="white" />
+        ) : (
+          <Text style={styles.buttonText}>Google 계정으로 로그인</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 40 },
+  container: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    backgroundColor: '#fff' 
+  },
+  title: { 
+    fontSize: 24, 
+    fontWeight: 'bold', 
+    marginBottom: 40,
+    color: '#333'
+  },
   button: { 
     backgroundColor: '#4285F4', 
-    paddingVertical: 12, 
-    paddingHorizontal: 24, 
+    paddingVertical: 14, 
+    paddingHorizontal: 30, 
     borderRadius: 8,
     flexDirection: 'row',
-    alignItems: 'center'
+    alignItems: 'center',
+    elevation: 3, // 안드로이드 그림자
   },
-  buttonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  buttonText: { 
+    color: 'white', 
+    fontSize: 16, 
+    fontWeight: '600',
+    marginLeft: 10 
+  },
 });

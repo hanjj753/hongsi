@@ -75,3 +75,6 @@ https://script.google.com/macros/s/AKfycbyBOydGHWawsHqZag_csfwITbMixWaTAyK3qMIz0
 import { FontAwesome } from '@expo/vector-icons';
 <FontAwesome name="google" size={24} color="black" />
 ```
+
+## 구글 로그인 웹 클라이언트 ID
+804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com
