@@ -13,7 +13,7 @@ const ATTENDANCE_SPOT = {
   radiusMeters: 100 // 허용 반경 (m)
 };
 
-const REQUIRED_ACCURACY = 500; // GPS 정확도 기준 (m)
+const REQUIRED_ACCURACY = 100; // GPS 정확도 기준 (m)
 
 /* ===============================
    2️⃣ 화면 컴포넌트
@@ -66,7 +66,7 @@ export default function AssistantScreen() {
         setMessage(`✅ 출석 인정 (${Math.round(dist)}m)`);
         // ⚠️ 실제 서비스에서는 서버로 전송
       } else {
-        setMessage(`❌ 출석 불가 (${Math.round(dist)}m)`);
+        setMessage(`❌ 출석 반려 (${Math.round(dist)}m)`);
       }
 
     } catch (err) {
