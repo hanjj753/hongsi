@@ -15,7 +15,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hongsi.assistant"
+      "bundleIdentifier": "com.hongsi.assistant",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "조교 출석 체크를 위해 현재 위치 정보를 사용합니다."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +26,11 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.hongsi.assistant",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
