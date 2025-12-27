@@ -8,8 +8,8 @@ import * as Location from "expo-location";
 ================================ */
 const ATTENDANCE_SPOT = {
   name: "학교 지정 위치",
-  lat: 37.502976,   // ← 실제 위도
-  lon: 127.044813,  // ← 실제 경도
+  lat: 37.499107,   // ← 실제 위도
+  lon: 127.046158,  // ← 실제 경도
   radiusMeters: 100 // 허용 반경 (m)
 };
 
@@ -57,10 +57,10 @@ export default function AssistantScreen() {
       setDistance(dist);
 
       // 출석 판정
-      if ((accuracy ?? 999) > REQUIRED_ACCURACY) {
-        setMessage(`❌ GPS 정확도가 낮습니다 (±${Math.round(accuracy!)}m)`);
-        return;
-      }
+      // if ((accuracy ?? 999) > REQUIRED_ACCURACY) {
+      //   setMessage(`❌ GPS 정확도가 낮습니다 (±${Math.round(accuracy!)}m)`);
+      //   return;
+      // }
 
       if (dist <= ATTENDANCE_SPOT.radiusMeters) {
         setMessage(`✅ 출석 인정 (${Math.round(dist)}m)`);
