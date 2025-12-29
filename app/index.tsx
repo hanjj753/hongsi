@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons'; // 아이콘 사용
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
-import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged as onWebAuthStateChanged } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged as onWebAuthStateChanged, signOut } from 'firebase/auth';
 import { webAuth } from '../firebaseConfig';
 
 export default function LoginScreen() {
@@ -16,14 +16,22 @@ export default function LoginScreen() {
   useEffect(() => {
     if (Platform.OS === 'web') {
       // [Web] 웹용 로그인 상태 감지
-      const unsubscribe = onWebAuthStateChanged(webAuth, (user) => {
-        if (user) router.replace('/(tabs)');
+      const unsubscribe = onWebAuthStateChanged(webAuth, async (user) => {
+        if (user) {
+          const token = localStorage.getItem('google_access_token');
+          if (token) {
+            router.replace('/(tabs)');
+          } else { 
+            await signOut(webAuth); 
+          }
+        }
       });
       return () => unsubscribe();
     } else {
       // [App] 앱용 구글 로그인 설정 & 상태 감지
       GoogleSignin.configure({
         webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
+        scopes: ['https://www.googleapis.com/auth/drive.readonly'],
       });
 
       const subscriber = auth().onAuthStateChanged((user) => {
@@ -40,8 +48,15 @@ export default function LoginScreen() {
     try {
       if (Platform.OS === 'web') {
         const provider = new GoogleAuthProvider();
-        await signInWithPopup(webAuth, provider);
-        
+        provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+        const result = await signInWithPopup(webAuth, provider);
+
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        const token = credential?.accessToken;
+
+        if (token) { localStorage.setItem('google_access_token', token); }
+
+        router.replace('/(tabs)');
       } else {
         await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
         const response = await GoogleSignin.signIn();
