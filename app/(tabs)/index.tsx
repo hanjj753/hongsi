@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import AntDesign from '@expo/vector-icons/AntDesign';
 
 import auth from '@react-native-firebase/auth';
 import { signOut } from 'firebase/auth';
