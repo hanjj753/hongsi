@@ -60,6 +60,7 @@ cd android
 ```bash
 npx expo start --web
 ```
+2. 끝내고 싶으면 ```Ctrl+C```
 
 ## 문자 테스트 시트 API 주소
 https://script.google.com/macros/s/AKfycbyBOydGHWawsHqZag_csfwITbMixWaTAyK3qMIz0Ro6tKM2MfnPK9OnGFZz4l1-TLvG/exec
