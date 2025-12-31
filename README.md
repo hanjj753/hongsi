@@ -60,6 +60,7 @@ cd android
 ```bash
 npx expo start --web
 ```
+2. 끝내고 싶으면 ```Ctrl+C```
 
 ## 문자 테스트 시트 API 주소
 REMOVED_PRIVATE_SCRIPT_URL
