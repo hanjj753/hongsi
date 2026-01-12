@@ -1,26 +1,4 @@
 // 전체 틀을 설정해주는 TypeScript 파일이라 건드릴 필요 X
-// import { Stack } from 'expo-router';
-// import { useEffect } from 'react';
-// import Ionicons from '@expo/vector-icons/Ionicons';
-// import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
-// import AntDesign from '@expo/vector-icons/AntDesign';
-// import Feather from '@expo/vector-icons/Feather';
-
-// export default function RootLayout() {
-//   useEffect(() => {
-//     Ionicons.loadFont();
-//     FontAwesome5.loadFont();
-//     AntDesign.loadFont();
-//     Feather.loadFont();
-//   }, []);
-
-//   return (
-//     <Stack screenOptions={{ headerShown: false }}>
-//       <Stack.Screen name="index" />
-//       <Stack.Screen name="(tabs)" />
-//     </Stack>
-//   );
-// }
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { useFonts } from 'expo-font'; // 폰트 로딩 훅
