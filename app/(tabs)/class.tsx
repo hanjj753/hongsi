@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
+  Pressable,
   StyleSheet,
   ScrollView,
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
+import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
 import { fetchSheetData } from "../utils/googleSheet_csv";
@@ -17,7 +19,9 @@ export default function ClassScreen() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
+  
+  const router = useRouter();
+  
   // ✅ selected quarter (local filter)
   // const [selectedQuarter, setSelectedQuarter] = useState<string>("ALL");
   const [selectedQuarter, setSelectedQuarter] = useState<string>("2026-1F");
@@ -126,7 +130,20 @@ export default function ClassScreen() {
             : subject || className || "수업";
 
         return (
-          <View key={`${r["ID"] ?? index}`} style={styles.card}>
+          <Pressable
+            key={`${r["ID"] ?? index}`}
+            style={({ pressed }) => [
+              styles.card,
+              pressed && { opacity: 0.9 },
+            ]}
+            onPress={() =>
+              router.push({
+                pathname: "/class/[id]",
+                params: { id: String(r["ID"]) },
+              })
+            }
+          >
+
             <View style={styles.accent} />
             <View style={styles.cardBody}>
               <Text style={styles.day}>{header}</Text>
@@ -151,7 +168,7 @@ export default function ClassScreen() {
                 </Text>
               </View>
             </View>
-          </View>
+          </Pressable>
         );
       })}
     </ScrollView>
