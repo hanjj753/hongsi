@@ -21,13 +21,6 @@ type WorkRow = {
   email: string;
 };
 
-function formatDateYYYYMMDD(dt: Date): string {
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, "0");
-  const d = String(dt.getDate()).padStart(2, "0");
-  return `${y}. ${m}. ${d}`;
-}
-
 function parseSheetDate(dateStr: string): Date | null {
   // "2025. 12. 3" / "2025.12.03" / "2025. 1. 13" 모두 처리
   const cleaned = String(dateStr || "").replace(/\s/g, ""); // 공백 제거
