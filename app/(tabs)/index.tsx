@@ -226,11 +226,16 @@ export default function HomeScreen() {
         <View style={styles.profileCard}>
           {user.photoURL && <Image source={{ uri: user.photoURL }} style={styles.avatar} />}
 
-          <Text style={styles.label}>이름</Text>
-          <Text style={styles.info}>{user.displayName || '이름 없음'}</Text>
-
-          <Text style={styles.label}>이메일</Text>
-          <Text style={styles.info}>{user.email}</Text>
+          {/* 1행: 레이블들 (이름 · 이메일) */}
+          <View style={styles.rowLabels}>
+            <Text style={styles.labelRow}>이름</Text>
+            <Text style={styles.labelRow}>이메일</Text>
+          </View>
+          {/* 2행: 상세 내용 (이름값 · 이메일값) */}
+          <View style={styles.rowValues}>
+            <Text style={styles.valueRow}>{user.displayName || '이름 없음'}</Text>
+            <Text style={styles.valueRow}>{user.email}</Text>
+          </View>
 
           {/* 월 선택 */}
           <View style={styles.section}>
@@ -375,6 +380,36 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 
+  /* 새 row 스타일: 이름/이메일을 가로로 배치 */
+  rowLabels: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    marginBottom: 4,
+    paddingHorizontal: 6,
+  },
+  rowValues: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 6,
+  },
+  labelRow: {
+    flex: 1,
+    fontSize: 13,
+    color: '#888',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  valueRow: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
   section: { width: '100%', marginTop: 18 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 8 },
   loadingText: { color: '#777', fontSize: 13 },
@@ -430,10 +465,10 @@ const styles = StyleSheet.create({
   logoutText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
 
   tableBodyBox: {
-    maxHeight: 150,   // 원하는 표의 최대 높이(px).
+    height: 150,   // 원하는 표의 최대 높이(px).
   },
 
   tableBodyScroll: {
-    flexGrow: 0,      // 내부 ScrollView가 무한 확장되지 않게
+    flexGrow: 1,      // 내부 ScrollView가 무한 확장되지 않게
   },
 });
