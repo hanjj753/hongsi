@@ -173,8 +173,8 @@ export default function ClassDetailScreen() {
     const map = new Map<string, string>();
 
     (data || []).forEach((r: Row) => {
-      const key = String(r["position"] ?? r["Position"] ?? "").trim();
-      const coord = String(r["coordinate"] ?? r["Coordinate"] ?? "").trim();
+      const key = String(r["장소"] ?? r["position"] ?? r["Position"] ?? "").trim();
+      const coord = String(r["좌표"] ?? r["coordinate"] ?? r["Coordinate"] ?? "").trim();
       if (key && coord) map.set(key, coord);
     });
 
