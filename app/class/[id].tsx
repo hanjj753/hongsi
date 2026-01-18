@@ -32,7 +32,7 @@ const POSITIONS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSYAs
 const ATTENDANCE_LOG_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSYAszZjdX2DbIo7pECDNw9OY_e0YT-FWZ8Idb3dWb5ZeOc-o87mBgx76XzW8R4sHhmdbxrbsmk2EHD/pub?gid=0&single=true&output=csv";
 
 // Attendance log (write)
-const ATTENDANCE_POST_URL = "https://script.google.com/macros/s/AKfycbyWVF2sj12lc9TB4sfr1Lz-EL05JuEhzPBivBv6D-mSFhisEKKfy3eY9kml4X7KU-RaEw/exec";
+const ATTENDANCE_POST_URL = "https://script.google.com/macros/s/AKfycbxbxaJZPQlphtlCJdMat3OL4xXRC_SnjlCfhm4d6OKz5QTA3fyJOl98cs9-f-pBxmXtag/exec";
 
 /** ===============================
  *  Types
@@ -46,7 +46,8 @@ type AttendanceSpot = {
   radiusMeters: number;
 };
 
-const DEFAULT_RADIUS_METERS = 100;
+const WARN_RADIUS_METERS = 30;    // 이 범위 내에서는 정상 출근
+const ACCEPT_RADIUS_METERS = 100; // 이 범위를 넘어서면 이상이면 경고 출력
 
 /** ===============================
  *  Helpers
@@ -224,7 +225,7 @@ export default function ClassDetailScreen() {
       name: positionKey,
       lat: parsed.lat,
       lon: parsed.lon,
-      radiusMeters: DEFAULT_RADIUS_METERS,
+      radiusMeters: ACCEPT_RADIUS_METERS, // 100
     };
   }, [row, posMap]);
 
@@ -328,32 +329,46 @@ export default function ClassDetailScreen() {
     const res = await getDistanceAndCoords();
     if (!res.ok) return;
 
-    if (!res.inside) {
-      setMessage(`❌ 출근 반려 (${Math.round(res.dist)}m)`);
-      return;
+    const distM = Math.round(res.dist);
+
+    // ✅ 비고 생성 (거리 구간에 따라)
+    let remark = "";
+    if (distM > WARN_RADIUS_METERS && distM < ACCEPT_RADIUS_METERS) {
+      remark = `⚠ 지정 위치 경고(30m 이상), ${distM} m`;
+    } else if (distM >= ACCEPT_RADIUS_METERS) {
+      remark = `⚠ 지정 위치 벗어남(100m 이상), ${distM} m`;
+    }
+
+    // ✅ 사용자 메시지 (100m 이상도 "반려" 아님)
+    if (distM <= WARN_RADIUS_METERS) {
+      setMessage(`✅ 출근 처리 완료 (${distM}m)`);
+    } else if (distM < ACCEPT_RADIUS_METERS) {
+      setMessage(`✅ 출근 처리 완료 (${distM}m)`);
+    } else {
+      setMessage(`✅ 출근 완료 (⚠경고: 지정된 위치와 ${distM}m 떨어져 있습니다)`);
     }
 
     const startTime = nowIso();
     const payload = {
-      date: todayYmd(),
-      class_id: String(row["ID"] ?? "").trim(),
-      class: classTitle,
-      person_email: userEmail,
-      start_time: startTime,
-      end_time: "",
-      상태: "출근",
-      status: "출근",
-      position: `${res.latitude},${res.longitude}`,
-      total_time: "",
-      // optional useful fields:
-      place_key: attendanceSpot?.name ?? "",
+      "근무 일자": todayYmd(),
+      "수업ID": String(row["ID"] ?? "").trim(),
+      "반": classTitle,
+      "근무자": String(row["근무자"] ?? row["조교"] ?? "").trim(), // 너 시트 구조에 맞게
+      "Email": userEmail,
+      "출근 시간": startTime,
+      "퇴근 시간": "",
+      "상태": "출근",
+      "위치": `${res.latitude},${res.longitude}`,
+      "근무 시간": "",
+      "비고": remark, // ← 여기!
     };
+
 
     setSaving(true);
     try {
       const out = await postAttendance(ATTENDANCE_POST_URL, payload);
       if (out?.ok) {
-        setMessage(`✅ 출근 처리 완료 (${Math.round(res.dist)}m)`);
+        // 메시지는 이미 위에서 세팅했으니 상태만 새로고침
         await loadAttendanceStatus();
       } else {
         setMessage("❌ 출근 저장 실패");
@@ -372,6 +387,7 @@ export default function ClassDetailScreen() {
     attendanceSpot?.name,
   ]);
 
+
   const handleCheckOut = useCallback(async () => {
     if (!row) return;
 
@@ -388,18 +404,13 @@ export default function ClassDetailScreen() {
     const totalMinutes = minutesBetween(checkInTime, endTime);
 
     const payload = {
-      date: todayYmd(),
-      class_id: String(row["ID"] ?? "").trim(),
-      class: classTitle,
-      person_email: userEmail,
-      start_time: checkInTime,
-      end_time: endTime,
-      상태: "퇴근",
-      status: "퇴근",
-      position: `${res.latitude},${res.longitude}`,
-      total_time: `${totalMinutes}m`,
-      place_key: attendanceSpot?.name ?? "",
+      action: "checkout_update",
+      "수업ID": String(row["ID"] ?? "").trim(),
+      "Email": userEmail.toLowerCase(),
+      "퇴근 시간": endTime,
+      "위치": `${res.latitude},${res.longitude}`,
     };
+
 
     setSaving(true);
     try {
