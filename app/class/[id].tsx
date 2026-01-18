@@ -52,6 +52,21 @@ const ACCEPT_RADIUS_METERS = 100; // 이 범위를 넘어서면 이상이면 경
 /** ===============================
  *  Helpers
  * =============================== */
+function nowHm() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function roundCoord5(n: number) {
+  return Math.round(n * 1e5) / 1e5;
+}
+
+function formatCoord5(n: number) {
+  return roundCoord5(n).toFixed(5);
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -99,17 +114,6 @@ function parseCoordinate(coord: any): { lat: number; lon: number } | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
   return { lat, lon };
-}
-
-// Pick latest record by start_time (ISO sorts lexicographically)
-function pickLatest(records: Row[]) {
-  return records
-    .slice()
-    .sort((x, y) =>
-      String(y["start_time"] ?? y["start time"] ?? "").localeCompare(
-        String(x["start_time"] ?? x["start time"] ?? "")
-      )
-    )[0];
 }
 
 export default function ClassDetailScreen() {
@@ -238,8 +242,8 @@ export default function ClassDetailScreen() {
     // Expecting headers:
     // class_id, person_email, start_time, 상태
     const relevant = (log || []).filter((r: Row) => {
-      const cid = String(r["class_id"] ?? r["class id"] ?? "").trim();
-      const mail = String(r["person_email"] ?? r["person mail"] ?? "").trim();
+      const cid = String(r["수업ID"] ?? "").trim();
+      const mail = String(r["Email"] ?? "").trim();
       return (
         cid === targetId && mail.toLowerCase() === userEmail.toLowerCase()
       );
@@ -251,11 +255,9 @@ export default function ClassDetailScreen() {
       return;
     }
 
-    const latest = pickLatest(relevant);
+    const latest = relevant[relevant.length - 1];
     const status = String(latest["상태"] ?? latest["status"] ?? "").trim();
-    const startTime = String(
-      latest["start_time"] ?? latest["start time"] ?? ""
-    ).trim();
+    const startTime = String(latest["출근 시간"] ?? "").trim();
 
     if (status === "출근") {
       setCheckedIn(true);
@@ -299,8 +301,11 @@ export default function ClassDetailScreen() {
       });
 
       const { latitude, longitude } = loc.coords;
-      setLatitude(latitude);
-      setLongitude(longitude);
+      const lat5 = roundCoord5(latitude);
+      const lon5 = roundCoord5(longitude);
+
+      setLatitude(lat5);
+      setLongitude(lon5);
 
       const dist = haversine(
         latitude,
@@ -348,7 +353,7 @@ export default function ClassDetailScreen() {
       setMessage(`✅ 출근 완료 (⚠경고: 지정된 위치와 ${distM}m 떨어져 있습니다)`);
     }
 
-    const startTime = nowIso();
+    const startTime = nowHm(); // "HH:MM"
     const payload = {
       "근무 일자": todayYmd(),
       "수업ID": String(row["ID"] ?? "").trim(),
@@ -358,8 +363,7 @@ export default function ClassDetailScreen() {
       "출근 시간": startTime,
       "퇴근 시간": "",
       "상태": "출근",
-      "위치": `${res.latitude},${res.longitude}`,
-      "근무 시간": "",
+      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
       "비고": remark, // ← 여기!
     };
 
@@ -400,15 +404,14 @@ export default function ClassDetailScreen() {
     const res = await getDistanceAndCoords();
     if (!res.ok) return;
 
-    const endTime = nowIso();
-    const totalMinutes = minutesBetween(checkInTime, endTime);
+    const endTime = nowHm(); // "HH:MM"
 
     const payload = {
       action: "checkout_update",
       "수업ID": String(row["ID"] ?? "").trim(),
       "Email": userEmail.toLowerCase(),
       "퇴근 시간": endTime,
-      "위치": `${res.latitude},${res.longitude}`,
+      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
     };
 
 
@@ -416,10 +419,10 @@ export default function ClassDetailScreen() {
     try {
       const out = await postAttendance(ATTENDANCE_POST_URL, payload);
       if (out?.ok) {
-        setMessage(`✅ 퇴근 처리 완료 (총 ${totalMinutes}분)`);
+        setMessage(out?.message ?? "✅ 퇴근 처리 완료");
         await loadAttendanceStatus();
       } else {
-        setMessage("❌ 퇴근 저장 실패");
+        setMessage(out?.error ?? "❌ 퇴근 저장 실패");
       }
     } catch {
       setMessage("❌ 퇴근 저장 실패 (네트워크/권한)");
