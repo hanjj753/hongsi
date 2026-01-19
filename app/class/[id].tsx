@@ -14,6 +14,7 @@ import {
   useRootNavigationState,
 } from "expo-router";
 import * as Location from "expo-location";
+import { getOpenShift, setOpenShift, clearOpenShift } from "../utils/openShiftStore";
 
 import { fetchSheetData } from "../utils/googleSheet_csv";
 import { postAttendance } from "../utils/attendanceApi";
@@ -52,8 +53,46 @@ const ACCEPT_RADIUS_METERS = 100; // 이 범위를 넘어서면 이상이면 경
 /** ===============================
  *  Helpers
  * =============================== */
-function nowIso() {
-  return new Date().toISOString();
+function hmToMinutes(hm: string) {
+  const m = String(hm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function minutesToHm(mins: number) {
+  const m = Math.max(0, Math.floor(mins));
+  const hh = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${hh}:${String(mm).padStart(2, "0")}`; // 예: "2:05"
+}
+
+function calcWorkMinutes(startHm: string, endHm: string) {
+  const s = hmToMinutes(startHm);
+  const e = hmToMinutes(endHm);
+  if (s === null || e === null) return null;
+
+  let diff = e - s;
+  if (diff < 0) diff += 24 * 60; // ✅ 자정 넘김
+  return diff;
+}
+
+function nowHm() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function roundCoord5(n: number) {
+  return Math.round(n * 1e5) / 1e5;
+}
+
+function formatCoord5(n: number) {
+  return roundCoord5(n).toFixed(5);
 }
 
 function todayYmd() {
@@ -101,17 +140,6 @@ function parseCoordinate(coord: any): { lat: number; lon: number } | null {
   return { lat, lon };
 }
 
-// Pick latest record by start_time (ISO sorts lexicographically)
-function pickLatest(records: Row[]) {
-  return records
-    .slice()
-    .sort((x, y) =>
-      String(y["start_time"] ?? y["start time"] ?? "").localeCompare(
-        String(x["start_time"] ?? x["start time"] ?? "")
-      )
-    )[0];
-}
-
 export default function ClassDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -138,6 +166,16 @@ export default function ClassDetailScreen() {
   /** ===============================
    *  State
    * =============================== */
+  const [actionLockUntil, setActionLockUntil] = useState<number>(0);
+  const [openShift, setOpenShiftState] = useState<null | {
+    classId: string;
+    classTitle: string;
+    email: string;
+    workDate: string;
+    startHm: string;
+    startedAt: number;
+  }>(null);
+  
   const [row, setRow] = useState<Row | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -147,13 +185,20 @@ export default function ClassDetailScreen() {
   const [checkingGps, setCheckingGps] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [message, setMessage] = useState("출석 버튼을 눌러 진행하세요.");
+  const [message, setMessage] = useState("출근 버튼을 눌러 진행하세요.");
   const [distance, setDistance] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [latitude, setLatitude] = useState<number | null>(null);
 
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const s = await getOpenShift();
+      setOpenShiftState(s);
+    })();
+  }, []);
 
   /** ===============================
    *  Load class row
@@ -210,9 +255,9 @@ export default function ClassDetailScreen() {
     if (!row || !posMap) return null;
 
     // This is the key we match to positions sheet.
-    // If you later add a dedicated column like "출석위치키", switch to that first.
+    // If you later add a dedicated column like "출근위치키", switch to that first.
     const positionKey = String(
-      row["출석위치키"] ?? row["position"] ?? row["장소"] ?? ""
+      row["출근위치키"] ?? row["position"] ?? row["장소"] ?? ""
     ).trim();
 
     if (!positionKey) return null;
@@ -233,40 +278,60 @@ export default function ClassDetailScreen() {
    *  Attendance status from log CSV
    * =============================== */
   const loadAttendanceStatus = useCallback(async () => {
-    const log = await fetchSheetData(ATTENDANCE_LOG_CSV_URL);
+    const log = await fetchSheetData(`${ATTENDANCE_LOG_CSV_URL}&t=${Date.now()}`); // 캐시 방지
 
-    // Expecting headers:
-    // class_id, person_email, start_time, 상태
+    // ✅ 본인(이메일) + 현재 수업ID 기록만
     const relevant = (log || []).filter((r: Row) => {
-      const cid = String(r["class_id"] ?? r["class id"] ?? "").trim();
-      const mail = String(r["person_email"] ?? r["person mail"] ?? "").trim();
-      return (
-        cid === targetId && mail.toLowerCase() === userEmail.toLowerCase()
-      );
+      const cid = String(r["수업ID"] ?? "").trim();
+      const mail = String(r["Email"] ?? "").trim().toLowerCase();
+      return cid === targetId && mail === userEmail.toLowerCase();
     });
 
     if (relevant.length === 0) {
       setCheckedIn(false);
       setCheckInTime(null);
+      setMessage("출근 버튼을 눌러 진행하세요.");
       return;
     }
 
-    const latest = pickLatest(relevant);
-    const status = String(latest["상태"] ?? latest["status"] ?? "").trim();
-    const startTime = String(
-      latest["start_time"] ?? latest["start time"] ?? ""
-    ).trim();
+    // ✅ 1) '출근' + '퇴근시간 빈칸' 인 행이 있으면 무조건 출근 상태
+    const openRows = relevant.filter((r: Row) => {
+      const st = String(r["상태"] ?? "").trim();
+      const start = String(r["출근 시간"] ?? "").trim();
+      const end = String(r["퇴근 시간"] ?? "").trim();
+      return st === "출근" && start !== "" && end === "";
+    });
+
+    // 최신 판단: "근무 일자 + 출근 시간" 문자열로 정렬 (YYYY-MM-DD 가정)
+    const keyOf = (r: Row) =>
+      `${String(r["근무 일자"] ?? "").trim()} ${String(r["출근 시간"] ?? "").trim()}`;
+
+    if (openRows.length > 0) {
+      const latestOpen = openRows.slice().sort((a, b) => keyOf(a).localeCompare(keyOf(b))).pop()!;
+      const startTime = String(latestOpen["출근 시간"] ?? "").trim();
+
+      setCheckedIn(true);
+      setCheckInTime(startTime || null);
+      setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
+      return;
+    }
+
+    // ✅ 2) 열린 출근이 없으면 그냥 최신 기록 기준으로 상태 표시
+    const latestAny = relevant.slice().sort((a, b) => keyOf(a).localeCompare(keyOf(b))).pop()!;
+    const status = String(latestAny["상태"] ?? "").trim();
 
     if (status === "출근") {
+      const startTime = String(latestAny["출근 시간"] ?? "").trim();
       setCheckedIn(true);
       setCheckInTime(startTime || null);
       setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
     } else {
       setCheckedIn(false);
       setCheckInTime(null);
-      setMessage("출석 버튼을 눌러 진행하세요.");
+      setMessage("출근 버튼을 눌러 진행하세요.");
     }
   }, [targetId, userEmail]);
+
 
   // Load attendance state after we have class + positions
   useEffect(() => {
@@ -279,7 +344,7 @@ export default function ClassDetailScreen() {
    * =============================== */
   const getDistanceAndCoords = useCallback(async () => {
     if (!attendanceSpot) {
-      setMessage("❌ 출석 좌표를 찾을 수 없습니다. (positions 시트 매칭 확인)");
+      setMessage("❌ 출근 좌표를 찾을 수 없습니다. (positions 시트 매칭 확인)");
       return { ok: false as const };
     }
 
@@ -299,8 +364,11 @@ export default function ClassDetailScreen() {
       });
 
       const { latitude, longitude } = loc.coords;
-      setLatitude(latitude);
-      setLongitude(longitude);
+      const lat5 = roundCoord5(latitude);
+      const lon5 = roundCoord5(longitude);
+
+      setLatitude(lat5);
+      setLongitude(lon5);
 
       const dist = haversine(
         latitude,
@@ -324,6 +392,13 @@ export default function ClassDetailScreen() {
    *  Actions
    * =============================== */
   const handleCheckIn = useCallback(async () => {
+    // ✅ 다른 수업에 출근 중이면 막기
+    const existing = await getOpenShift();
+    if (existing && existing.email === userEmail.toLowerCase() && existing.classId !== targetId) {
+      setMessage(`❌ 이미 "${existing.classTitle}" 수업에 출근한 상태입니다.\n해당 수업에서 먼저 퇴근해 주세요.`);
+      return;
+    }
+
     if (!row) return;
 
     const res = await getDistanceAndCoords();
@@ -348,7 +423,7 @@ export default function ClassDetailScreen() {
       setMessage(`✅ 출근 완료 (⚠경고: 지정된 위치와 ${distM}m 떨어져 있습니다)`);
     }
 
-    const startTime = nowIso();
+    const startTime = nowHm(); // "HH:MM"
     const payload = {
       "근무 일자": todayYmd(),
       "수업ID": String(row["ID"] ?? "").trim(),
@@ -358,8 +433,7 @@ export default function ClassDetailScreen() {
       "출근 시간": startTime,
       "퇴근 시간": "",
       "상태": "출근",
-      "위치": `${res.latitude},${res.longitude}`,
-      "근무 시간": "",
+      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
       "비고": remark, // ← 여기!
     };
 
@@ -368,8 +442,30 @@ export default function ClassDetailScreen() {
     try {
       const out = await postAttendance(ATTENDANCE_POST_URL, payload);
       if (out?.ok) {
-        // 메시지는 이미 위에서 세팅했으니 상태만 새로고침
-        await loadAttendanceStatus();
+        // ✅ 출근 즉시 상태 반영(CSV 지연 대비)
+        setCheckedIn(true);
+        setCheckInTime(startTime);
+        setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
+
+        // ✅ 전역 출근 상태 저장 (수업탭에서도 표시/다른 수업 막기)
+        const os = {
+          classId: targetId,
+          classTitle,
+          email: userEmail.toLowerCase(),
+          workDate: todayYmd(),
+          startHm: startTime,
+          startedAt: Date.now(),
+        };
+        await setOpenShift(os);
+        setOpenShiftState(os);
+
+        // ✅ 출근 직후 퇴근 연타 방지(2초)
+        setActionLockUntil(Date.now() + 2000);
+
+        // ✅ 뒤에서 동기화(캐시깨고 재조회)
+        setTimeout(() => {
+          loadAttendanceStatus();
+        }, 1200);
       } else {
         setMessage("❌ 출근 저장 실패");
       }
@@ -389,6 +485,12 @@ export default function ClassDetailScreen() {
 
 
   const handleCheckOut = useCallback(async () => {
+    // ✅ 출근/퇴근 공용 연타 방지
+    if (Date.now() < actionLockUntil) {
+      setMessage("⏳ 처리 중입니다. 잠시 후 다시 눌러주세요.");
+      return;
+    }
+
     if (!row) return;
 
     if (!checkInTime) {
@@ -400,41 +502,64 @@ export default function ClassDetailScreen() {
     const res = await getDistanceAndCoords();
     if (!res.ok) return;
 
-    const endTime = nowIso();
-    const totalMinutes = minutesBetween(checkInTime, endTime);
+    const endTime = nowHm(); // "HH:MM"
+    const workMin = calcWorkMinutes(checkInTime, endTime);
+    const workHm = workMin === null ? "" : minutesToHm(workMin);
 
     const payload = {
       action: "checkout_update",
       "수업ID": String(row["ID"] ?? "").trim(),
       "Email": userEmail.toLowerCase(),
       "퇴근 시간": endTime,
-      "위치": `${res.latitude},${res.longitude}`,
+      "근무 시간": workHm,
+      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
     };
 
-
+    // ✅ 퇴근도 "즉시 UI 반영" (CSV 지연 대비)
     setSaving(true);
     try {
+      // 1) 버튼/상태 먼저 잠금
+      setActionLockUntil(Date.now() + 2000);
+
+      // 2) UI 먼저 퇴근 처리된 것처럼 보여주기
+      setCheckedIn(false);
+      setCheckInTime(null);
+      setMessage("✅ 퇴근 처리 중…");
+
+      // 3) 전역 출근 상태도 바로 제거 (수업탭 배너 즉시 내려감)
+      await clearOpenShift();
+      setOpenShiftState(null);
+
+      // 4) 서버 업데이트
       const out = await postAttendance(ATTENDANCE_POST_URL, payload);
+
       if (out?.ok) {
-        setMessage(`✅ 퇴근 처리 완료 (총 ${totalMinutes}분)`);
-        await loadAttendanceStatus();
+        setMessage(out?.message ?? "✅ 퇴근 처리 완료");
+
+        // 5) 뒤에서 동기화(캐시깨고 재조회)
+        setTimeout(() => {
+          loadAttendanceStatus();
+        }, 1200);
       } else {
-        setMessage("❌ 퇴근 저장 실패");
+        // 실패하면 상태 복구 시도
+        setMessage(out?.error ?? "❌ 퇴근 저장 실패");
+        await loadAttendanceStatus();
       }
     } catch {
       setMessage("❌ 퇴근 저장 실패 (네트워크/권한)");
+      await loadAttendanceStatus();
     } finally {
       setSaving(false);
     }
   }, [
     row,
-    classTitle,
     userEmail,
     checkInTime,
     getDistanceAndCoords,
     loadAttendanceStatus,
-    attendanceSpot?.name,
+    actionLockUntil,
   ]);
+
 
   /** ===============================
    *  UI states
@@ -471,7 +596,7 @@ export default function ClassDetailScreen() {
 
   // FAB
   const fabDisabled =
-    checkingGps || saving || posLoading || !attendanceSpot;
+    checkingGps || saving || posLoading || !attendanceSpot || Date.now() < actionLockUntil;
   const fabLabel = checkedIn ? "퇴근" : "출근";
 
   return (
@@ -502,11 +627,11 @@ export default function ClassDetailScreen() {
         />
 
         <View style={styles.attendanceCard}>
-          <Text style={styles.attendanceTitle}>출석</Text>
+          <Text style={styles.attendanceTitle}>출근</Text>
 
           <Text style={styles.attendanceDesc}>
             {posLoading
-              ? "출석 위치 로딩 중…"
+              ? "출근 위치 로딩 중…"
               : attendanceSpot
               ? `기준 위치: ${attendanceSpot.name}  (반경 ${attendanceSpot.radiusMeters}m)`
               : "❗ positions 시트에서 좌표를 찾을 수 없습니다. (position 키 매칭 확인)"}
