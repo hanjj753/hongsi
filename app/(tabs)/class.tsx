@@ -12,6 +12,8 @@ import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
 import { fetchSheetData } from "../utils/googleSheet_csv";
+import { useFocusEffect } from "@react-navigation/native";
+import { getOpenShift } from "../utils/openShiftStore";
 
 const SHEET_CSV_URL = "REMOVED_PRIVATE_SHEET_URL";
 
@@ -19,7 +21,19 @@ export default function ClassScreen() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  
+  const [openShift, setOpenShift] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [didAutoPick, setDidAutoPick] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        const s = await getOpenShift();
+        setOpenShift(s);
+      })();
+    }, [])
+  );
+
   const router = useRouter();
   
   // ✅ selected quarter (local filter)
@@ -27,16 +41,30 @@ export default function ClassScreen() {
   const [selectedQuarter, setSelectedQuarter] = useState<string>("2026-1F");
 
   const load = useCallback(async () => {
-    const data = await fetchSheetData(SHEET_CSV_URL);
+    setError(null);
 
-    const cleaned = (data || []).filter(
-      (r) =>
-        r &&
-        (r["과목"] || r["수업 목록"] || r["장소"] || r["시작"] || r["종료"])
-    );
+    const tryFetch = async () => {
+      const data = await fetchSheetData(`${SHEET_CSV_URL}&t=${Date.now()}`);
+      const cleaned = (data || []).filter((r) => r && String(r["ID"] ?? "").trim() !== "");
+      return cleaned;
+    };
 
-    setRows(cleaned);
+    try {
+      let cleaned = await tryFetch();
+
+      // ✅ 첫 요청이 비었으면 1번만 재시도
+      if (cleaned.length === 0) {
+        await new Promise((res) => setTimeout(res, 600));
+        cleaned = await tryFetch();
+      }
+
+      setRows(cleaned);
+    } catch (e: any) {
+      setRows([]);
+      setError(e?.message ?? "수업 목록을 불러오지 못했습니다.");
+    }
   }, []);
+
 
   // fetch once on screen load
   useEffect(() => {
@@ -69,6 +97,51 @@ export default function ClassScreen() {
     return ["ALL", ...unique];
   }, [rows]);
 
+  function parseQuarterKey(q: string) {
+    // 2026-1F / 2025-2V 같은 형식
+    const m = String(q ?? "").trim().match(/^(\d{4})-(\d)([MFV])$/i);
+    if (!m) return null;
+
+    const year = Number(m[1]);
+    const sem = Number(m[2]); // 1 or 2
+    const z = m[3].toUpperCase(); // M/F/V
+
+    const zRank = z === "M" ? 1 : z === "F" ? 2 : z === "V" ? 3 : 0;
+    return { year, sem, zRank, raw: `${year}-${sem}${z}` };
+  }
+
+  function compareQuarter(a: string, b: string) {
+    const pa = parseQuarterKey(a);
+    const pb = parseQuarterKey(b);
+    if (!pa && !pb) return 0;
+    if (!pa) return -1;
+    if (!pb) return 1;
+
+    if (pa.year !== pb.year) return pa.year - pb.year;
+    if (pa.sem !== pb.sem) return pa.sem - pb.sem;
+    return pa.zRank - pb.zRank;
+  }
+
+  const latestQuarter = useMemo(() => {
+    const qs = rows
+      .map((r) => String(r["분기"] ?? "").trim())
+      .filter(Boolean);
+
+    if (qs.length === 0) return null;
+
+    // 최신 = max
+    return qs.slice().sort((a, b) => compareQuarter(a, b)).pop()!;
+  }, [rows]);
+
+  useEffect(() => {
+    // ✅ 데이터 들어온 뒤 1번만 자동 설정
+    if (didAutoPick) return;
+    if (!latestQuarter) return;
+
+    setSelectedQuarter(latestQuarter);
+    setDidAutoPick(true);
+  }, [didAutoPick, latestQuarter]);
+  
   // ✅ local filtering only
   const filteredRows = useMemo(() => {
     if (selectedQuarter === "ALL") return rows;
@@ -94,6 +167,23 @@ export default function ClassScreen() {
     >
       <FontAwesome5 name="chalkboard" size={28} color="#333" />
       <Text style={styles.title}>수업 목록</Text>
+      {openShift && (
+        <Pressable
+          style={styles.openShiftBanner}
+          onPress={() =>
+            router.push({
+              pathname: "/class/[id]",
+              params: { id: openShift.classId },
+            })
+          }
+        >
+          <Text style={styles.openShiftTitle}>현재 출근 중</Text>
+          <Text style={styles.openShiftText}>
+            {openShift.classTitle} · {openShift.startHm} 출근
+          </Text>
+          <Text style={styles.openShiftHint}>눌러서 해당 수업으로 이동</Text>
+        </Pressable>
+      )}
 
       {/* ✅ Quarter filter UI */}
       <View style={styles.filterWrap}>
@@ -259,4 +349,31 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontWeight: "500",
   },
+
+  openShiftBanner: {
+    width: "92%",
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 10,
+  },
+  openShiftTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#4F46E5",
+    marginBottom: 6,
+  },
+  openShiftText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  openShiftHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#6B7280",
+  },
+
 });
