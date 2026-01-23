@@ -39,6 +39,17 @@ export default function TabLayout() {
           tabBarIcon: ({color, size}) => <Feather name="folder" size={size} color={color} />,
         }}
       />
+
+      {/* ✅ 5. 메시지 탭 */}
+      <Tabs.Screen
+        name="message"
+        options={{
+          title: '메시지',
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="message-square" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
