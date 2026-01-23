@@ -1,24 +1,14 @@
 // app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-} from "react-native";
-import {
-  useLocalSearchParams,
-  useRouter,
-  useRootNavigationState,
-} from "expo-router";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, PermissionsAndroid, Platform, TextInput } from "react-native";
+import { useLocalSearchParams, useRouter, useRootNavigationState, } from "expo-router";
 import * as Location from "expo-location";
 import { getOpenShift, setOpenShift, clearOpenShift } from "../utils/openShiftStore";
 
 import { fetchSheetData } from "../utils/googleSheet_csv";
 import { postAttendance } from "../utils/attendanceApi";
 import { getCurrentUserEmail } from "../utils/currentUser";
+import DirectSms from "../utils/DirectSms";
 
 /** ===============================
  *  URLs
@@ -192,6 +182,7 @@ export default function ClassDetailScreen() {
 
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState<string | null>(null);
+  const [noticeText, setNoticeText] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -560,6 +551,25 @@ export default function ClassDetailScreen() {
     actionLockUntil,
   ]);
 
+  /** ===============================
+   * 1. 공지 발송 핸들러 (빨간 버튼)
+   * =============================== */
+  const handleSendNotice = useCallback(() => {
+    if (!noticeText.trim()) {
+      Alert.alert("알림", "공지할 내용을 입력해주세요.");
+      return;
+    }
+    // TODO: 입력된 noticeText를 전체 수강생에게 발송하는 로직 구현 예정
+    Alert.alert("준비 중", `[전체 공지]\n내용: ${noticeText}\n\n이 기능은 추후 연결됩니다.`);
+  }, [noticeText]);
+
+  /** ===============================
+   * 2. 개별 메시지 발송 핸들러 (초록 버튼)
+   * =============================== */
+  const handleSendIndividual = useCallback(() => {
+    // TODO: Google Sheet URL 데이터를 읽어와서 개별 발송하는 로직 구현 예정
+    Alert.alert("준비 중", "개별 메시지 발송 기능은 추후 연결됩니다.");
+  }, []);
 
   /** ===============================
    *  UI states
@@ -653,6 +663,50 @@ export default function ClassDetailScreen() {
 
           <Text style={styles.attendanceDebug}>로그인: {userEmail}</Text>
         </View>
+        <View style={styles.smsCard}>
+          <Text style={styles.attendanceTitle}>공지 발송</Text>
+          <Text style={styles.attendanceDesc}>
+            수강생들에게 단체 문자를 발송합니다.
+          </Text>
+
+          {/* 텍스트 입력창 추가 */}
+          <TextInput
+            style={styles.textInput}
+            placeholder="공지 내용을 입력하세요"
+            multiline={true} // 여러 줄 입력 가능
+            numberOfLines={3}
+            value={noticeText}
+            onChangeText={setNoticeText}
+            textAlignVertical="top" // 안드로이드에서 텍스트 위쪽 정렬
+          />
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.redButton, // 빨간색 스타일 적용
+              pressed && { opacity: 0.8 },
+            ]}
+            onPress={handleSendNotice}
+          >
+            <Text style={styles.buttonText}>공지 보내기</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.smsCard}>
+          <Text style={styles.attendanceTitle}>개별 메시지 발송</Text>
+          <Text style={styles.attendanceDesc}>
+            수강생들에게 개인별 문자를 발송합니다.
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.greenButton, // 초록색 스타일 적용
+              pressed && { opacity: 0.8 },
+            ]}
+            onPress={handleSendIndividual}
+          >
+            <Text style={styles.buttonText}>문자 메시지 보내기</Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       {/* Floating action button bottom-right */}
@@ -738,4 +792,52 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   fabText: { color: "#fff", fontWeight: "900", fontSize: 16 },
+  smsCard: {
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginTop: 10,
+  },
+  
+  // 텍스트 입력창 스타일
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    minHeight: 80, // 높이 확보
+    fontSize: 14,
+    color: "#111827",
+    backgroundColor: "#F9FAFB",
+  },
+
+  // 버튼 공통 텍스트
+  buttonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+  // 빨간 버튼 (공지)
+  redButton: {
+    backgroundColor: "#EF4444", // 빨간색
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+
+  // 초록 버튼 (개별)
+  greenButton: {
+    backgroundColor: "#10B981", // 초록색
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10, // 위쪽 설명과의 간격
+  },
 });
