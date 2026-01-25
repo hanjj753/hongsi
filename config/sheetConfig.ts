@@ -40,7 +40,7 @@ export const CLASSES_HEADERS = {
   WORKER_COUNT: "조교 수", 
   WORKERS: "근무자",     
   HOURLY_WAGE: "시급",
-  SHEET_URL: "시트 URL",
+  SHEET_URL: "시트 CSV URL",
   MASTER_SHEET_URL: "마스터 시트 URL",
 };
 
@@ -75,6 +75,7 @@ export const MESSAGE_LOG_HEADERS = {
   ID: "ID",              // 수업 ID는 CLASS_ID, 학생 ID는 ID
   STUDENT_NAME: "학생",
   PARENT_PHONE: "학부모 전화번호",
+  MESSAGE_STATUS: "상태",
   CONTENT: "내용",
 };
 
@@ -88,7 +89,13 @@ export const MASTER_SHEET_HEADERS = {
   STUDENT_PHONE: "학생 전화번호",
   PARENT_PHONE: "학부모 전화번호",
   STUDENT_EMAIL: "이메일",
+  STUDENT_ATTENDANCE: "출석",
+  STUDENT_HOMEWORK: "숙제",
+  STUDENT_TEST: "시험",
 };
+export const MASTER_SHEET_HEADER_ROW = 5;
+export const MASTER_DATA_COL_SHIFT = 7; // H열부터 데이터 시작
+export const MASTER_SESSION_STRIDE = 3; // 데이터가 3열 간격으로 배치
 
 // 수업별 시트
 // 5행의 A~E열까지의 헤더
@@ -98,4 +105,10 @@ export const CLASS_SHEET_HEADERS = {
   STUDENT_PHONE: "학생 전화번호",
   PARENT_PHONE: "학부모 전화번호",
   STUDENT_EMAIL: "이메일",
+  STUDENT_ATTENDANCE: "출석",
+  STUDENT_HOMEWORK: "숙제",
+  STUDENT_TEST: "시험",
 };
+export const CLASS_SHEET_HEADER_ROW = 5;
+export const CLASS_DATA_COL_SHIFT = 5; // F열부터 데이터 시작
+export const CLASS_SESSION_STRIDE = 3; // 데이터가 3열 간격으로 배치

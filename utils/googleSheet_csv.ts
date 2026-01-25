@@ -1,5 +1,6 @@
 // csv를 2차원 배열로 파싱하고, 객체 배열로 변환하는 유틸리티 함수
 import { Platform } from "react-native";
+import { CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW } from "../config/sheetConfig"; 
 
 /**
  * 문자열 맨 앞의 BOM(Byte Order Mark) 특수문자를 제거합니다.
@@ -99,4 +100,81 @@ export async function fetchSheetData(url: string): Promise<Record<string, string
   });
 
   return result;
+}
+
+export async function fetchClassSheet(url: string): Promise<Record<string, string>[]> {
+  const fetchOptions: RequestInit = {
+    method: "GET",
+    headers: { Accept: "text/csv" },
+    ...(Platform.OS === "web" ? { cache: "no-store" } : {}),
+  };
+
+  try {
+    const res = await fetch(url, fetchOptions);
+    const text = await res.text();
+
+    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+    const sniff = text.slice(0, 200).toLowerCase();
+    if (sniff.includes("<!doctype html") || sniff.includes("<html")) {
+      throw new Error("HTML 반환됨 (웹 게시 확인 필요)");
+    }
+
+    // 기존 parseCSV 재활용 (안전함)
+    const grid = parseCSV(stripBOM(text));
+    
+    // 헤더 행 인덱스 계산 (5행 -> index 4)
+    const headerRowIndex = (CLASS_SHEET_HEADER_ROW || 5) - 1;
+
+    if (grid.length <= headerRowIndex) return [];
+
+    // 헤더 추출
+    const headers = grid[headerRowIndex].map((h) => stripBOM(String(h ?? "")).trim());
+
+    // 데이터 추출 (헤더 다음 행부터)
+    const result = grid.slice(headerRowIndex + 1).map((vals) => {
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => {
+        obj[h] = String(vals[i] ?? "").trim();
+      });
+      return obj;
+    });
+
+    // ID가 있는 유효한 행만 필터링해서 반환
+    return result.filter(r => r[CLASS_SHEET_HEADERS.ID]);
+
+  } catch (e) {
+    console.error("[fetchClassSheet] Error:", e);
+    return [];
+  }
+}
+
+export async function fetchClassSheetRaw(url: string): Promise<string[][]> {
+  const fetchOptions: RequestInit = {
+    method: "GET",
+    headers: { Accept: "text/csv" },
+    ...(Platform.OS === "web" ? { cache: "no-store" } : {}),
+  };
+
+  try {
+    const res = await fetch(url, fetchOptions);
+    const text = await res.text();
+
+    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+    // 기존 parseCSV 재활용
+    const grid = parseCSV(stripBOM(text));
+    
+    // 헤더 행 인덱스 (설정값 사용, 없으면 기본값 5 -> 인덱스 4)
+    const headerRowIndex = (CLASS_SHEET_HEADER_ROW || 5) - 1;
+
+    if (grid.length <= headerRowIndex + 1) return [];
+
+    // 헤더 행 다음부터 끝까지 데이터만 잘라서 반환
+    return grid.slice(headerRowIndex + 1);
+
+  } catch (e) {
+    console.error("[fetchClassSheetRaw] Error:", e);
+    return [];
+  }
 }

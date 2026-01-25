@@ -1,6 +1,6 @@
 // 수업 생성 시트에서 수업 ID로 시트 URL과 마스터 시트 URL을 조회하는 유틸 함수
 import { fetchSheetData } from "./googleSheet_csv";
-import { CSV_URLS, CLASSES_HEADERS } from "./sheetConfig";
+import { CSV_URLS, CLASSES_HEADERS } from "../config/sheetConfig";
 
 /**
  * 수업 ID(classId)를 기반으로 해당 수업의 시트 URL과 마스터 시트 URL을 찾습니다.

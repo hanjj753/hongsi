@@ -8,7 +8,7 @@ import { useFocusEffect } from "@react-navigation/native";
 
 // Utils (경로 ../../utils 로 유지)
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, CLASSES_HEADERS } from "../../utils/sheetConfig";
+import { CSV_URLS, CLASSES_HEADERS } from "../../config/sheetConfig";
 import { getActiveSession, ActiveSession } from "../../utils/activeSession";
 
 export default function ClassScreen() {
@@ -121,7 +121,8 @@ export default function ClassScreen() {
         // ✅ [수정됨] CLASS_NAME 헤더 없이 학교 + 과목 조합
         const school = String(r[CLASSES_HEADERS.SCHOOL] ?? "").trim();
         const subject = String(r[CLASSES_HEADERS.SUBJECT] ?? "").trim();
-        const header = (school && subject) ? `${school} ${subject}` : (school || subject || "수업");
+        const day = String(r[CLASSES_HEADERS.DAY] ?? "").trim();
+        const header = (school && subject) ? `${school} ${subject} ${day}` : (school || subject || "수업");
 
         const place = String(r[CLASSES_HEADERS.PLACE] ?? "").trim();
         const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();

@@ -3,16 +3,17 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
+import * as Application from 'expo-application';
 
 // Firebase & Auth
 import auth from '@react-native-firebase/auth';
 import { signOut } from 'firebase/auth';
-import { webAuth } from '../../firebaseConfig'; // 여긴 ../../가 맞을 수 있습니다 (프로젝트 구조에 따라 확인 필요)
+import { webAuth } from '../../firebaseConfig'; 
 
 // Utils & Config
 import { getCurrentUserEmail } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, ATTENDANCE_LOG_HEADERS } from "../../utils/sheetConfig";
+import { CSV_URLS, ATTENDANCE_LOG_HEADERS } from "../../config/sheetConfig";
 
 // ==========================================
 // Types & Helpers
@@ -62,11 +63,20 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
+  
+  // Android ID 상태
+  const [androidId, setAndroidId] = useState<string | null>(null);
 
-  // 1. 로그인 유저 확인
+  // 1. 로그인 유저 확인 & 기기 ID 확인
   useEffect(() => {
     const u = Platform.OS === 'web' ? webAuth.currentUser : auth().currentUser;
     setUser(u);
+
+    // 안드로이드 ID 가져오기
+    if (Platform.OS === 'android') {
+      const id = Application.getAndroidId();
+      setAndroidId(id);
+    }
   }, []);
 
   // 2. 근무 기록 로드
@@ -74,15 +84,12 @@ export default function HomeScreen() {
     const email = getCurrentUserEmail();
     if (!email) return;
 
-    // sheetConfig의 ATTENDANCE_LOG URL 사용
     const data = await fetchSheetData(CSV_URLS.ATTENDANCE_LOG);
-
     const myEmail = email.trim().toLowerCase();
     
     const myRows: WorkRow[] = (data || [])
       .filter((r: any) => {
         const rowEmail = (r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ||  "").trim().toLowerCase();
-        
         return rowEmail === myEmail;
       })
       .map((r: any) => ({
@@ -169,6 +176,16 @@ export default function HomeScreen() {
       {user && (
         <View style={styles.card}>
           {user.photoURL && <Image source={{ uri: user.photoURL }} style={styles.avatar} />}
+          
+          {androidId && (
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ fontSize: 12, color: '#999', marginBottom: 2 }}>Device ID</Text>
+              <Text style={{ fontSize: 14, color: '#555', fontWeight: 'bold' }} selectable>
+                {androidId}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.row}>
             <InfoItem label="이름" value={user.displayName || "이름 없음"} />
             <InfoItem label="이메일" value={user.email} />
