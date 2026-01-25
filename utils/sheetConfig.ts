@@ -48,6 +48,7 @@ export const CLASSES_HEADERS = {
 export const ATTENDANCE_LOG_HEADERS = {
   ATTENDANCE_DATE: "근무 일자",
   CLASS_ID: "수업ID",
+  QUARTER: "분기",
   CLASS_NAME: "수업",
   DAY: "요일", 
   WORKERS: "근무자", // 수업 생성 시트의 WORKERS와 동일

@@ -1,9 +1,10 @@
+// app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
 import * as Location from "expo-location";
 
-// Utils (경로 수정됨)
+// Utils & Config
 import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { postSheetData } from "../../utils/sheetApi";
 import { getActiveSession, startSession, clearSession, ActiveSession } from "../../utils/activeSession";
@@ -11,8 +12,8 @@ import { getCurrentUserEmail } from "../../utils/currentUser";
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS } from "../../utils/sheetConfig";
 
 // Constants
-const WARN_RADIUS_METERS = 30; 
-const ACCEPT_RADIUS_METERS = 100;
+const WARN_RADIUS_METERS = 30; // 30m 이내 정상
+const ACCEPT_RADIUS_METERS = 100; // 100m 이내 인정(경고)
 const SHEET_NAME_ATTENDANCE = "조교_출석_현황"; 
 
 // Helpers
@@ -114,7 +115,6 @@ export default function ClassDetailScreen() {
       setCheckedIn(false); setCheckInTime(null); setMessage("출근 버튼을 눌러 진행하세요."); return;
     }
 
-    // "출근" 상태인 기록 찾기
     const active = myLog.find((r: any) => {
       const st = String(r[ATTENDANCE_LOG_HEADERS.STATUS] ?? "").trim();
       // 퇴근 시간이 비어있고 상태가 출근인 경우
@@ -148,7 +148,7 @@ export default function ClassDetailScreen() {
     finally { setCheckingGps(false); }
   };
 
-  // 5. 출근 핸들러 (새로운 줄 생성)
+  // 5. 출근 핸들러 (분기 정보 추가됨 ⭐)
   const handleCheckIn = async () => {
     const existing = await getActiveSession();
     if (existing && existing.email === userEmail!.toLowerCase() && existing.classId !== targetId) {
@@ -162,9 +162,10 @@ export default function ClassDetailScreen() {
     const startTime = nowHm();
 
     const payload = {
-      action: "checkin", // 스크립트 분기용 (생략시 기본값)
+      action: "checkin", 
       [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: todayYmd(),
       [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
+      [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(), // ✅ 추가됨: 분기 정보
       [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
       [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
       [ATTENDANCE_LOG_HEADERS.WORKERS]: String(row![CLASSES_HEADERS.WORKERS] ?? "").trim(),
@@ -190,14 +191,13 @@ export default function ClassDetailScreen() {
     }
   };
 
-  // 6. 퇴근 핸들러 (기존 줄 업데이트 ⭐)
+  // 6. 퇴근 핸들러
   const handleCheckOut = async () => {
     if (Date.now() < actionLockUntil) return;
     if (!checkInTime) { await loadAttendanceStatus(); return; }
     
     // GPS는 퇴근 시에는 선택사항일 수 있으나 기록을 위해 가져옴
     const gps = await getGps(); 
-    // 만약 퇴근 시엔 위치 체크 안 하려면 위 줄 주석 처리 후 gps 관련 필드 제거
 
     const endTime = nowHm();
     const startM = hmToMinutes(checkInTime);
@@ -209,14 +209,12 @@ export default function ClassDetailScreen() {
       workHm = minutesToHm(diff);
     }
 
-    // ⭐ 수정된 부분: 업데이트를 위한 최소한의 식별 정보만 보냄
     const payload = {
       action: "checkout_update",
-      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,         // 식별용 1
-      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail,    // 식별용 2
-      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,    // 업데이트 값
-      "근무 시간": workHm,                                   // 업데이트 값
-      // [ATTENDANCE_LOG_HEADERS.STATUS]는 스크립트에서 자동으로 "퇴근"으로 변경함
+      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
+      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail, 
+      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,
+      "근무 시간": workHm, // Apps Script는 "근무 시간" 컬럼을 사용
     };
 
     setSaving(true);
