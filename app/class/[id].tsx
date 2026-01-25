@@ -1,6 +1,6 @@
 // app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
 import * as Location from "expo-location";
 import * as Application from "expo-application";
@@ -397,9 +397,28 @@ export default function ClassDetailScreen() {
   };
 
   const handleDirectSms = async () => {
+    // 1. [중요] 안드로이드 문자 권한 요청
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.SEND_SMS,
+        {
+          title: "문자 보내기 권한",
+          message: "앱에서 학생들에게 문자를 보내려면 권한이 필요합니다.",
+          buttonNeutral: "나중에",
+          buttonNegative: "취소",
+          buttonPositive: "허용"
+        }
+      );
+
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        Alert.alert("권한 거부", "권한이 없어서 문자를 보낼 수 없습니다.\n[설정]에서 권한을 허용해주세요.");
+        return;
+      }
+    }
+
     Alert.alert(
       "문자 발송",
-      "현재 대기 중인(unsent) 모든 메시지를 발송하시겠습니까?",
+      "현재 수업의 대기 중인(unsent) 메시지를 모두 발송하시겠습니까?",
       [
         { text: "취소", style: "cancel" },
         {
@@ -407,8 +426,7 @@ export default function ClassDetailScreen() {
           onPress: async () => {
             setSaving(true);
             try {
-              // 1. 메시지 로그 시트 데이터 가져오기 (GAS doGet 사용)
-              // sheetConfig.ts의 SHEET_NAME_MESSAGE 확인 ("메시지 log")
+              // 2. 메시지 로그 시트 데이터 가져오기
               const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAME_MESSAGE}`);
               const data = await response.json();
               
@@ -417,24 +435,27 @@ export default function ClassDetailScreen() {
                 return;
               }
 
-              // 2. 'unsent' 상태인 메시지 필터링
-              // GAS에서 가져온 JSON의 키는 시트의 헤더 이름("상태", "학부모 전화번호", "내용")입니다.
-              const unsentMessages = data.filter((row: any) => row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent");
+              // 3. 필터링: 'unsent' 상태 AND '현재 수업 ID'
+              const unsentMessages = data.filter((row: any) => {
+                const isUnsent = row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent";
+                const isSameClass = String(row[MESSAGE_LOG_HEADERS.CLASS_ID]) === String(targetId);
+                
+                return isUnsent && isSameClass;
+              });
 
               if (unsentMessages.length === 0) {
-                Alert.alert("알림", "발송 대기 중인(unsent) 메시지가 없습니다.");
+                Alert.alert("알림", "이 수업에 발송 대기 중인(unsent) 메시지가 없습니다.");
                 setSaving(false);
                 return;
               }
 
-              // 3. 문자 발송 (DirectSms)
+              // 4. 문자 발송 (DirectSms)
               let sentCount = 0;
               for (const msg of unsentMessages) {
-                const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE]; // "학부모 전화번호"
-                const content = msg[MESSAGE_LOG_HEADERS.CONTENT];   // "내용"
+                const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE];
+                const content = msg[MESSAGE_LOG_HEADERS.CONTENT];
 
                 if (phone && content) {
-                  // 전화번호에서 하이픈 제거 (선택사항, 모듈에 따라 다름)
                   const cleanPhone = String(phone).replace(/-/g, "");
                   try {
                     await DirectSms.sendDirectSms(cleanPhone, content);
@@ -443,25 +464,28 @@ export default function ClassDetailScreen() {
                     console.error("SMS 전송 실패:", phone, e);
                   }
                 }
+                // 통신사 스팸 차단 방지 (0.5초 딜레이)
+                await new Promise(resolve => setTimeout(resolve, 500));
               }
 
-              // 4. 시트 상태 업데이트 요청 (unsent -> sent)
+              // 5. 시트 상태 업데이트 요청 (이 수업 ID만 sent로 변경)
               const updatePayload = {
                 sheetName: SHEET_NAME_MESSAGE,
-                action: "update_status" // GAS에서 이 action을 처리하도록 수정됨
+                action: "update_status",
+                classId: targetId, 
               };
               
               const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAME_MESSAGE, updatePayload);
 
               if (updateRes.ok) {
-                 Alert.alert("완료", `${sentCount}건의 문자를 발송하고 상태를 업데이트했습니다.`);
+                 Alert.alert("완료", `${sentCount}건의 문자를 발송했습니다.`);
               } else {
                  Alert.alert("주의", "문자는 발송했으나, 시트 상태 업데이트에 실패했습니다.");
               }
 
             } catch (error) {
               console.error(error);
-              Alert.alert("오류", "작업 중 문제가 발생했습니다.");
+              Alert.alert("오류 상세", error.message || "알 수 없는 오류");
             } finally {
               setSaving(false);
             }
