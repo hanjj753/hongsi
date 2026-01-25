@@ -23,7 +23,11 @@ export default function RootLayout() {
 
   // 폰트 로딩 에러 처리
   useEffect(() => {
-    if (error) throw error;
+    if (error) {
+      console.error("폰트 로딩 에러 (무시하고 진행):", error);
+      // 에러가 나도 스플래시를 숨겨서 앱이 보이게 함
+      SplashScreen.hideAsync(); 
+    }
   }, [error]);
 
   // 로딩 완료 시 스플래시 화면 숨김

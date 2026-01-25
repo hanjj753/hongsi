@@ -11,33 +11,48 @@ import { webAuth } from '../firebaseConfig';
 export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      // [Web] 웹용 로그인 상태 감지
-      const unsubscribe = onWebAuthStateChanged(webAuth, async (user) => {
-        if (user) {
-          const token = localStorage.getItem('google_access_token');
-          if (token) {
-            router.replace('/(tabs)');
-          } else { 
-            await signOut(webAuth); 
+    const init = async () => {
+      try {
+        if (Platform.OS === 'web') {
+          // [Web] 로직
+          onWebAuthStateChanged(webAuth, async (user) => {
+            if (user) {
+              const token = localStorage.getItem('google_access_token');
+              if (token) router.replace('/(tabs)');
+              else await signOut(webAuth); 
+            }
+            setInitializing(false); // 웹 초기화 완료
+          });
+        } else {
+          // [App] 앱용 구글 로그인 설정
+          // ⚠️ 여기서 에러가 나면 흰 화면이 됩니다. try-catch로 잡습니다.
+          try {
+            GoogleSignin.configure({
+              webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
+              scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+            });
+          } catch (configError: any) {
+            console.error("GoogleSignin Config Error:", configError);
+            Alert.alert("설정 오류", "구글 로그인 설정 중 오류가 발생했습니다.\n" + configError.message);
           }
-        }
-      });
-      return () => unsubscribe();
-    } else {
-      // [App] 앱용 구글 로그인 설정 & 상태 감지
-      GoogleSignin.configure({
-        webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
-        scopes: ['https://www.googleapis.com/auth/drive.readonly'],
-      });
 
-      const subscriber = auth().onAuthStateChanged((user) => {
-        if (user) router.replace('/(tabs)');
-      });
-      return subscriber;
-    }
+          const subscriber = auth().onAuthStateChanged((user) => {
+            if (user) router.replace('/(tabs)');
+            setInitializing(false); // 앱 초기화 완료
+          });
+          return subscriber;
+        }
+      } catch (e: any) {
+        console.error("Init Error:", e);
+        Alert.alert("초기화 오류", e.message);
+        setInitializing(false);
+      }
+    };
+
+    init();
   }, []);
 
   async function onGoogleButtonPress() {
@@ -70,13 +85,22 @@ export default function LoginScreen() {
     } catch (error: any) {
       console.error(error);
       if (error.code === 'auth/popup-closed-by-user' || error.code === 'SIGN_IN_CANCELLED') {
-        // 사용자가 창 닫음 (무시)
+        // 무시
       } else {
         Alert.alert('로그인 실패', error.message);
       }
     } finally {
       setLoading(false);
     }
+  }
+
+  if (initializing) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={{ marginTop: 20, color: '#666' }}>앱을 실행 중입니다...</Text>
+      </View>
+    );
   }
 
   return (
