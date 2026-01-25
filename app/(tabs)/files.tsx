@@ -1,10 +1,10 @@
+// [파일] 탭
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Alert, Platform, TouchableOpacity, Linking, Image } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { setLanguageCode } from '@react-native-firebase/auth';
 
-const TARGET_FOLDER_NAME = "김연주쌤 과학"
+const TARGET_FOLDER_NAME = "김연주쌤 과학";
 
 export default function FilesScreen() {
   const [loading, setLoading] = useState(false);
@@ -15,58 +15,61 @@ export default function FilesScreen() {
     findTargetFolderId();
   }, []);
 
+  // 액세스 토큰 가져오기 (Drive API용)
   const getAccessToken = async () => {
-    if(Platform.OS === 'web') {
-      const token = localStorage.getItem('google_access_token'); 
+    if (Platform.OS === 'web') {
+      const token = localStorage.getItem('google_access_token');
       if (!token) throw new Error('인증 토큰이 없습니다. 로그인 탭에서 다시 로그인해주세요.');
       return token;
     } else {
+      // ✅ 앱에서는 GoogleSignin을 통해 Access Token을 직접 받아옵니다.
       const tokens = await GoogleSignin.getTokens();
       return tokens.accessToken;
     }
-  }
+  };
 
+  // 폴더 ID 찾기
   const findTargetFolderId = async () => {
-    
     setLoading(true);
     setIsTargetMissing(false);
 
     try {
       const token = await getAccessToken();
-
-      const query = `name = '${TARGET_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder'and starred = true and trashed = false`;
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`, {
+      
+      // 1. 쿼리: 이름 일치 + 폴더 타입 + 중요문서함(Star) + 휴지통 아님
+      const query = `name = '${TARGET_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and starred = true and trashed = false`;
+      const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       const result = await response.json();
 
-      if(result.files && result.files.length > 0) {
+      if (result.files && result.files.length > 0) {
         setFolderId(result.files[0].id);
       } else {
         setIsTargetMissing(true);
       }
-
-    } catch (error : any) {
-      console.error("폴더 검색 실패: ", error)
+    } catch (error: any) {
+      console.error("[Drive API Error]", error);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   const openGoogleDrive = () => {
-    let url = 'https://drive.google.com/drive/my-drive'; //내 드라이브 주소
-    
-    if(folderId) {
+    let url = 'https://drive.google.com/drive/my-drive';
+    if (folderId) {
       url = `https://drive.google.com/drive/folders/${folderId}`;
     }
 
     Linking.openURL(url).catch(err => {
       Alert.alert('오류', '구글 드라이브를 열 수 없습니다.');
-      console.error("Linking Error", err);
     });
-  }
+  };
 
+  // 1. 폴더 미발견 (안내 화면)
   if (isTargetMissing) {
     return (
       <View style={styles.container}>
@@ -74,20 +77,21 @@ export default function FilesScreen() {
         <Text style={styles.title}>폴더 연결 필요</Text>
         <Text style={styles.desc}>
           구글 드라이브에서{"\n"}
-          <Text style={{fontWeight:'bold'}}>'{TARGET_FOLDER_NAME}'</Text> 폴더를{"\n"}
-          중요 문서함(별표)에 추가해주세요. (위 폴더를 공유받지 못하였다면 조교장에게 연락 부탁드립니다.)
+          <Text style={{ fontWeight: 'bold' }}>'{TARGET_FOLDER_NAME}'</Text> 폴더를{"\n"}
+          중요 문서함(별표)에 추가해주세요.
         </Text>
         <TouchableOpacity style={styles.retryButton} onPress={findTargetFolderId}>
           <Text style={styles.retryText}>확인 후 다시 시도</Text>
         </TouchableOpacity>
       </View>
-    )
+    );
   }
 
+  // 2. 정상 화면
   return (
     <View style={styles.container}>
-      <Image 
-        source={{uri: 'https://upload.wikimedia.org/wikipedia/commons/d/da/Google_Drive_logo_%282020-present%29.png'}}
+      <Image
+        source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/d/da/Google_Drive_logo_%282020-present%29.png' }}
         style={styles.logo}
         resizeMode="contain"
       />
@@ -110,67 +114,21 @@ export default function FilesScreen() {
         {Platform.OS === 'web' ? '새 탭에서 드라이브가 열립니다.' : '구글 드라이브 앱으로 연결됩니다.'}
       </Text>
     </View>
-  )
+  );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 30,
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  desc: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 40,
-  },
+  container: { flex: 1, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  logo: { width: 100, height: 100, marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: 'bold', color: '#333', marginBottom: 10 },
+  desc: { fontSize: 16, color: '#666', textAlign: 'center', lineHeight: 24, marginBottom: 40 },
   mainButton: {
-    backgroundColor: '#4285F4',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 30,
-    elevation: 5, // 안드로이드 그림자
-    shadowColor: "#000", // iOS 그림자
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+    backgroundColor: '#4285F4', flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 15, paddingHorizontal: 40, borderRadius: 30,
+    elevation: 5, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5,
   },
-  buttonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  subText: {
-    marginTop: 20,
-    fontSize: 13,
-    color: '#999',
-  },
-  retryButton: {
-    marginTop: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    backgroundColor: '#eee',
-    borderRadius: 8,
-  },
-  retryText: {
-    color: '#333',
-    fontWeight: '600',
-  }
+  buttonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  subText: { marginTop: 20, fontSize: 13, color: '#999' },
+  retryButton: { marginTop: 20, paddingVertical: 10, paddingHorizontal: 20, backgroundColor: '#eee', borderRadius: 8 },
+  retryText: { color: '#333', fontWeight: '600' }
 });

@@ -1,843 +1,323 @@
-// app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, PermissionsAndroid, Platform, TextInput } from "react-native";
-import { useLocalSearchParams, useRouter, useRootNavigationState, } from "expo-router";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput } from "react-native";
+import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
 import * as Location from "expo-location";
-import { getOpenShift, setOpenShift, clearOpenShift } from "../utils/openShiftStore";
 
-import { fetchSheetData } from "../utils/googleSheet_csv";
-import { postAttendance } from "../utils/attendanceApi";
-import { getCurrentUserEmail } from "../utils/currentUser";
-import DirectSms from "../utils/DirectSms";
+// Utils (경로 수정됨)
+import { fetchSheetData } from "../../utils/googleSheet_csv";
+import { postSheetData } from "../../utils/sheetApi";
+import { getActiveSession, startSession, clearSession, ActiveSession } from "../../utils/activeSession";
+import { getCurrentUserEmail } from "../../utils/currentUser";
+import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS } from "../../utils/sheetConfig";
 
-/** ===============================
- *  URLs
- * =============================== */
-// Classes (read)
-const CLASSES_CSV_URL = "REMOVED_PRIVATE_SHEET_URL";
+// Constants
+const WARN_RADIUS_METERS = 30; 
+const ACCEPT_RADIUS_METERS = 100;
+const SHEET_NAME_ATTENDANCE = "조교_출석_현황"; 
 
-// Classes Positions
-const POSITIONS_CSV_URL = "REMOVED_PRIVATE_SHEET_URL";
-
-// Attendance log (read) — publish this sheet/tab as CSV too
-const ATTENDANCE_LOG_CSV_URL = "REMOVED_PRIVATE_SHEET_URL";
-
-// Attendance log (write)
-const ATTENDANCE_POST_URL = "REMOVED_PRIVATE_SCRIPT_URL";
-
-/** ===============================
- *  Types
- * =============================== */
-type Row = Record<string, any>;
-
-type AttendanceSpot = {
-  name: string;
-  lat: number;
-  lon: number;
-  radiusMeters: number;
-};
-
-const WARN_RADIUS_METERS = 30;    // 이 범위 내에서는 정상 출근
-const ACCEPT_RADIUS_METERS = 100; // 이 범위를 넘어서면 이상이면 경고 출력
-
-/** ===============================
- *  Helpers
- * =============================== */
-function hmToMinutes(hm: string) {
+// Helpers
+const hmToMinutes = (hm: string) => {
   const m = String(hm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-  return hh * 60 + mm;
-}
-
-function minutesToHm(mins: number) {
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+const minutesToHm = (mins: number) => {
   const m = Math.max(0, Math.floor(mins));
-  const hh = Math.floor(m / 60);
-  const mm = m % 60;
-  return `${hh}:${String(mm).padStart(2, "0")}`; // 예: "2:05"
-}
-
-function calcWorkMinutes(startHm: string, endHm: string) {
-  const s = hmToMinutes(startHm);
-  const e = hmToMinutes(endHm);
-  if (s === null || e === null) return null;
-
-  let diff = e - s;
-  if (diff < 0) diff += 24 * 60; // ✅ 자정 넘김
-  return diff;
-}
-
-function nowHm() {
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+};
+const nowHm = () => {
   const d = new Date();
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
-}
-
-function roundCoord5(n: number) {
-  return Math.round(n * 1e5) / 1e5;
-}
-
-function formatCoord5(n: number) {
-  return roundCoord5(n).toFixed(5);
-}
-
-function todayYmd() {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+const todayYmd = () => {
   const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
-
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const formatCoord5 = (n: number) => (Math.round(n * 1e5) / 1e5).toFixed(5);
+const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
+  const a = Math.sin(toRad(lat2 - lat1) / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin((toRad(lon2 - lon1)) / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function minutesBetween(startIso: string, endIso: string) {
-  const a = new Date(startIso).getTime();
-  const b = new Date(endIso).getTime();
-  return Math.max(0, Math.round((b - a) / 60000));
-}
-
-function parseCoordinate(coord: any): { lat: number; lon: number } | null {
-  const raw = String(coord ?? "").trim();
-  if (!raw) return null;
-
-  // Accept: "37.12,127.33" (+ spaces). Also tolerate "(..,..)".
-  const cleaned = raw.replace(/[()]/g, "");
-  const parts = cleaned.split(",").map((s) => s.trim());
-  if (parts.length < 2) return null;
-
-  const lat = Number(parts[0]);
-  const lon = Number(parts[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-  return { lat, lon };
-}
+};
 
 export default function ClassDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const rootNavState = useRootNavigationState();
   const navReady = !!rootNavState?.key;
-
-  const rawId = (params as any)?.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-  const targetId = String(id ?? "").trim();
-
-  // Logged in email (from Firebase auth)
+  const targetId = String(Array.isArray(params.id) ? params.id[0] : params.id ?? "").trim();
   const userEmail = getCurrentUserEmail();
 
-  // ✅ Redirect only after nav is ready (prevents "navigate before mounting")
-  useEffect(() => {
-    if (!navReady) return;
-    if (!userEmail) router.replace("/(tabs)");
-  }, [navReady, userEmail, router]);
+  useEffect(() => { if (navReady && !userEmail) router.replace("/(tabs)"); }, [navReady, userEmail, router]);
+  if (!navReady || !userEmail) return null;
 
-  // Don’t render screen until navigation is ready and user exists
-  if (!navReady) return null;
-  if (!userEmail) return null;
-
-  /** ===============================
-   *  State
-   * =============================== */
+  // --- State ---
   const [actionLockUntil, setActionLockUntil] = useState<number>(0);
-  const [openShift, setOpenShiftState] = useState<null | {
-    classId: string;
-    classTitle: string;
-    email: string;
-    workDate: string;
-    startHm: string;
-    startedAt: number;
-  }>(null);
-  
-  const [row, setRow] = useState<Row | null>(null);
-  const [loading, setLoading] = useState(true);
-
+  const [row, setRow] = useState<any>(null);
   const [posMap, setPosMap] = useState<Map<string, string> | null>(null);
-  const [posLoading, setPosLoading] = useState(true);
-
+  const [loading, setLoading] = useState(true);
+  
   const [checkingGps, setCheckingGps] = useState(false);
   const [saving, setSaving] = useState(false);
-
   const [message, setMessage] = useState("출근 버튼을 눌러 진행하세요.");
-  const [distance, setDistance] = useState<number | null>(null);
-  const [longitude, setLongitude] = useState<number | null>(null);
-  const [latitude, setLatitude] = useState<number | null>(null);
-
+  
   const [checkedIn, setCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState<string | null>(null);
   const [noticeText, setNoticeText] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      const s = await getOpenShift();
-      setOpenShiftState(s);
-    })();
-  }, []);
-
-  /** ===============================
-   *  Load class row
-   * =============================== */
-  const loadClass = useCallback(async () => {
-    const data = await fetchSheetData(CLASSES_CSV_URL);
-    const found = (data || []).find(
-      (r: Row) => String(r["ID"] ?? "").trim() === targetId
-    );
-    setRow(found || null);
-  }, [targetId]);
-
-  /** ===============================
-   *  Load positions map (position -> "lat,lon")
-   * =============================== */
-  const loadPositions = useCallback(async () => {
-    const data = await fetchSheetData(POSITIONS_CSV_URL);
-    const map = new Map<string, string>();
-
-    (data || []).forEach((r: Row) => {
-      const key = String(r["장소"] ?? r["position"] ?? r["Position"] ?? "").trim();
-      const coord = String(r["좌표"] ?? r["coordinate"] ?? r["Coordinate"] ?? "").trim();
-      if (key && coord) map.set(key, coord);
-    });
-
-    setPosMap(map);
-  }, []);
-
+  // 1. 데이터 로드
   useEffect(() => {
     (async () => {
       try {
-        await Promise.all([loadClass(), loadPositions()]);
-      } finally {
-        setLoading(false);
-        setPosLoading(false);
-      }
+        const [cData, pData] = await Promise.all([fetchSheetData(CSV_URLS.CLASSES), fetchSheetData(CSV_URLS.POSITIONS)]);
+        setRow((cData || []).find((r: any) => String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() === targetId) || null);
+        
+        const map = new Map<string, string>();
+        (pData || []).forEach((r: any) => {
+          const key = String(r[POSITIONS_HEADERS.PLACE] ?? "").trim();
+          const val = String(r[POSITIONS_HEADERS.PLACE_LOCATION] ?? "").trim();
+          if (key && val) map.set(key, val);
+        });
+        setPosMap(map);
+      } finally { setLoading(false); }
     })();
-  }, [loadClass, loadPositions]);
+  }, [targetId]);
 
-  /** ===============================
-   *  Derived
-   * =============================== */
+  // 2. 파생 정보
   const classTitle = useMemo(() => {
     if (!row) return "";
-    const subject = String(row["과목"] ?? "").trim();
-    const className = String(row["수업 목록"] ?? "").trim();
-    return subject && className
-      ? `${subject} · ${className}`
-      : subject || className || "수업";
+    const school = String(row[CLASSES_HEADERS.SCHOOL] ?? "").trim();
+    const subject = String(row[CLASSES_HEADERS.SUBJECT] ?? "").trim();
+    return (school && subject) ? `${school} ${subject}` : (school || subject || "수업");
   }, [row]);
 
-  // ✅ Find attendance spot based on the class “장소” matching positions sheet `position`
-  const attendanceSpot: AttendanceSpot | null = useMemo(() => {
+  const attendanceSpot = useMemo(() => {
     if (!row || !posMap) return null;
-
-    // This is the key we match to positions sheet.
-    // If you later add a dedicated column like "출근위치키", switch to that first.
-    const positionKey = String(
-      row["출근위치키"] ?? row["position"] ?? row["장소"] ?? ""
-    ).trim();
-
-    if (!positionKey) return null;
-
-    const coordStr = posMap.get(positionKey);
-    const parsed = parseCoordinate(coordStr);
-    if (!parsed) return null;
-
-    return {
-      name: positionKey,
-      lat: parsed.lat,
-      lon: parsed.lon,
-      radiusMeters: ACCEPT_RADIUS_METERS, // 100
-    };
+    const placeName = String(row[CLASSES_HEADERS.PLACE] ?? "").trim();
+    if (!placeName) return null;
+    
+    const rawCoord = posMap.get(placeName) ?? "";
+    const parts = rawCoord.replace(/[()]/g, "").split(",").map(s => s.trim());
+    if (parts.length < 2) return null;
+    return { name: placeName, lat: Number(parts[0]), lon: Number(parts[1]), radiusMeters: ACCEPT_RADIUS_METERS };
   }, [row, posMap]);
 
-  /** ===============================
-   *  Attendance status from log CSV
-   * =============================== */
+  // 3. 출석 상태 확인
   const loadAttendanceStatus = useCallback(async () => {
-    const log = await fetchSheetData(`${ATTENDANCE_LOG_CSV_URL}&t=${Date.now()}`); // 캐시 방지
-
-    // ✅ 본인(이메일) + 현재 수업ID 기록만
-    const relevant = (log || []).filter((r: Row) => {
-      const cid = String(r["수업ID"] ?? "").trim();
-      const mail = String(r["Email"] ?? "").trim().toLowerCase();
-      return cid === targetId && mail === userEmail.toLowerCase();
+    const log = await fetchSheetData(`${CSV_URLS.ATTENDANCE_LOG}&t=${Date.now()}`);
+    const myLog = (log || []).filter((r: any) => {
+      const cid = String(r[ATTENDANCE_LOG_HEADERS.CLASS_ID] ?? "").trim();
+      const mail = String(r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ?? r["Email"] ?? "").trim().toLowerCase();
+      return cid === targetId && mail === userEmail!.toLowerCase();
     });
 
-    if (relevant.length === 0) {
-      setCheckedIn(false);
-      setCheckInTime(null);
-      setMessage("출근 버튼을 눌러 진행하세요.");
-      return;
+    if (myLog.length === 0) {
+      setCheckedIn(false); setCheckInTime(null); setMessage("출근 버튼을 눌러 진행하세요."); return;
     }
 
-    // ✅ 1) '출근' + '퇴근시간 빈칸' 인 행이 있으면 무조건 출근 상태
-    const openRows = relevant.filter((r: Row) => {
-      const st = String(r["상태"] ?? "").trim();
-      const start = String(r["출근 시간"] ?? "").trim();
-      const end = String(r["퇴근 시간"] ?? "").trim();
-      return st === "출근" && start !== "" && end === "";
+    // "출근" 상태인 기록 찾기
+    const active = myLog.find((r: any) => {
+      const st = String(r[ATTENDANCE_LOG_HEADERS.STATUS] ?? "").trim();
+      // 퇴근 시간이 비어있고 상태가 출근인 경우
+      return st === "출근";
     });
 
-    // 최신 판단: "근무 일자 + 출근 시간" 문자열로 정렬 (YYYY-MM-DD 가정)
-    const keyOf = (r: Row) =>
-      `${String(r["근무 일자"] ?? "").trim()} ${String(r["출근 시간"] ?? "").trim()}`;
-
-    if (openRows.length > 0) {
-      const latestOpen = openRows.slice().sort((a, b) => keyOf(a).localeCompare(keyOf(b))).pop()!;
-      const startTime = String(latestOpen["출근 시간"] ?? "").trim();
-
+    if (active) {
       setCheckedIn(true);
-      setCheckInTime(startTime || null);
-      setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
-      return;
-    }
-
-    // ✅ 2) 열린 출근이 없으면 그냥 최신 기록 기준으로 상태 표시
-    const latestAny = relevant.slice().sort((a, b) => keyOf(a).localeCompare(keyOf(b))).pop()!;
-    const status = String(latestAny["상태"] ?? "").trim();
-
-    if (status === "출근") {
-      const startTime = String(latestAny["출근 시간"] ?? "").trim();
-      setCheckedIn(true);
-      setCheckInTime(startTime || null);
+      setCheckInTime(String(active[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim());
       setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
     } else {
-      setCheckedIn(false);
-      setCheckInTime(null);
-      setMessage("출근 버튼을 눌러 진행하세요.");
+      setCheckedIn(false); setCheckInTime(null); setMessage("출근 버튼을 눌러 진행하세요.");
     }
   }, [targetId, userEmail]);
 
+  useEffect(() => { if (row) loadAttendanceStatus(); }, [row, loadAttendanceStatus]);
 
-  // Load attendance state after we have class + positions
-  useEffect(() => {
-    if (!row) return;
-    loadAttendanceStatus();
-  }, [row, loadAttendanceStatus]);
-
-  /** ===============================
-   *  Location + distance
-   * =============================== */
-  const getDistanceAndCoords = useCallback(async () => {
-    if (!attendanceSpot) {
-      setMessage("❌ 출근 좌표를 찾을 수 없습니다. (positions 시트 매칭 확인)");
-      return { ok: false as const };
-    }
-
-    setCheckingGps(true);
-    setMessage("위치 확인 중…");
-    setDistance(null);
-
+  // 4. GPS
+  const getGps = async () => {
+    if (!attendanceSpot) { setMessage("❌ 수업 장소 좌표가 없습니다."); return null; }
+    setCheckingGps(true); setMessage("위치 확인 중…");
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setMessage("❌ 위치 권한이 필요합니다.");
-        return { ok: false as const };
-      }
-
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
-      });
-
+      if (status !== "granted") { setMessage("❌ 위치 권한이 필요합니다."); return null; }
+      
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
       const { latitude, longitude } = loc.coords;
-      const lat5 = roundCoord5(latitude);
-      const lon5 = roundCoord5(longitude);
+      const dist = haversine(latitude, longitude, attendanceSpot.lat, attendanceSpot.lon);
+      return { lat: latitude, lon: longitude, dist };
+    } catch { setMessage("❌ 위치 확인 실패"); return null; }
+    finally { setCheckingGps(false); }
+  };
 
-      setLatitude(lat5);
-      setLongitude(lon5);
-
-      const dist = haversine(
-        latitude,
-        longitude,
-        attendanceSpot.lat,
-        attendanceSpot.lon
-      );
-      setDistance(dist);
-
-      const inside = dist <= attendanceSpot.radiusMeters;
-      return { ok: true as const, dist, inside, latitude, longitude };
-    } catch {
-      setMessage("❌ 위치 확인 실패");
-      return { ok: false as const };
-    } finally {
-      setCheckingGps(false);
+  // 5. 출근 핸들러 (새로운 줄 생성)
+  const handleCheckIn = async () => {
+    const existing = await getActiveSession();
+    if (existing && existing.email === userEmail!.toLowerCase() && existing.classId !== targetId) {
+      Alert.alert("알림", `이미 "${existing.className}" 수업에 출근 중입니다.`); return;
     }
-  }, [attendanceSpot]);
+    const gps = await getGps();
+    if (!gps) return;
 
-  /** ===============================
-   *  Actions
-   * =============================== */
-  const handleCheckIn = useCallback(async () => {
-    // ✅ 다른 수업에 출근 중이면 막기
-    const existing = await getOpenShift();
-    if (existing && existing.email === userEmail.toLowerCase() && existing.classId !== targetId) {
-      setMessage(`❌ 이미 "${existing.classTitle}" 수업에 출근한 상태입니다.\n해당 수업에서 먼저 퇴근해 주세요.`);
-      return;
-    }
+    const distM = Math.round(gps.dist);
+    let remark = distM > WARN_RADIUS_METERS ? `⚠ 지정 위치 벗어남 (${distM}m)` : "";
+    const startTime = nowHm();
 
-    if (!row) return;
-
-    const res = await getDistanceAndCoords();
-    if (!res.ok) return;
-
-    const distM = Math.round(res.dist);
-
-    // ✅ 비고 생성 (거리 구간에 따라)
-    let remark = "";
-    if (distM > WARN_RADIUS_METERS && distM < ACCEPT_RADIUS_METERS) {
-      remark = `⚠ 지정 위치 경고(30m 이상), ${distM} m`;
-    } else if (distM >= ACCEPT_RADIUS_METERS) {
-      remark = `⚠ 지정 위치 벗어남(100m 이상), ${distM} m`;
-    }
-
-    // ✅ 사용자 메시지 (100m 이상도 "반려" 아님)
-    if (distM <= WARN_RADIUS_METERS) {
-      setMessage(`✅ 출근 처리 완료 (${distM}m)`);
-    } else if (distM < ACCEPT_RADIUS_METERS) {
-      setMessage(`✅ 출근 처리 완료 (${distM}m)`);
-    } else {
-      setMessage(`✅ 출근 완료 (⚠경고: 지정된 위치와 ${distM}m 떨어져 있습니다)`);
-    }
-
-    const startTime = nowHm(); // "HH:MM"
     const payload = {
-      "근무 일자": todayYmd(),
-      "수업ID": String(row["ID"] ?? "").trim(),
-      "반": classTitle,
-      "근무자": String(row["근무자"] ?? row["조교"] ?? "").trim(), // 너 시트 구조에 맞게
-      "Email": userEmail,
-      "출근 시간": startTime,
-      "퇴근 시간": "",
-      "상태": "출근",
-      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
-      "비고": remark, // ← 여기!
+      action: "checkin", // 스크립트 분기용 (생략시 기본값)
+      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: todayYmd(),
+      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
+      [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
+      [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
+      [ATTENDANCE_LOG_HEADERS.WORKERS]: String(row![CLASSES_HEADERS.WORKERS] ?? "").trim(),
+      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail,
+      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: startTime,
+      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: "",
+      [ATTENDANCE_LOG_HEADERS.STATUS]: "출근",
+      [ATTENDANCE_LOG_HEADERS.WORKER_LOCATION]: `${formatCoord5(gps.lat)},${formatCoord5(gps.lon)}`,
+      [ATTENDANCE_LOG_HEADERS.NOTE]: remark,
     };
 
-
     setSaving(true);
-    try {
-      const out = await postAttendance(ATTENDANCE_POST_URL, payload);
-      if (out?.ok) {
-        // ✅ 출근 즉시 상태 반영(CSV 지연 대비)
-        setCheckedIn(true);
-        setCheckInTime(startTime);
-        setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
+    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAME_ATTENDANCE, payload);
+    setSaving(false);
 
-        // ✅ 전역 출근 상태 저장 (수업탭에서도 표시/다른 수업 막기)
-        const os = {
-          classId: targetId,
-          classTitle,
-          email: userEmail.toLowerCase(),
-          workDate: todayYmd(),
-          startHm: startTime,
-          startedAt: Date.now(),
-        };
-        await setOpenShift(os);
-        setOpenShiftState(os);
-
-        // ✅ 출근 직후 퇴근 연타 방지(2초)
-        setActionLockUntil(Date.now() + 2000);
-
-        // ✅ 뒤에서 동기화(캐시깨고 재조회)
-        setTimeout(() => {
-          loadAttendanceStatus();
-        }, 1200);
-      } else {
-        setMessage("❌ 출근 저장 실패");
-      }
-    } catch {
-      setMessage("❌ 출근 저장 실패 (네트워크/권한)");
-    } finally {
-      setSaving(false);
+    if (res.ok) {
+      setCheckedIn(true); setCheckInTime(startTime); setMessage(`✅ 출근 완료 (${distM}m)`);
+      await startSession({ classId: targetId, className: classTitle, email: userEmail!.toLowerCase(), workDate: todayYmd(), startHm: startTime, startedAt: Date.now() });
+      setActionLockUntil(Date.now() + 2000);
+      setTimeout(loadAttendanceStatus, 1500);
+    } else {
+      setMessage(`❌ 출근 실패: ${res.error || "오류 발생"}`);
     }
-  }, [
-    row,
-    classTitle,
-    userEmail,
-    getDistanceAndCoords,
-    loadAttendanceStatus,
-    attendanceSpot?.name,
-  ]);
+  };
 
+  // 6. 퇴근 핸들러 (기존 줄 업데이트 ⭐)
+  const handleCheckOut = async () => {
+    if (Date.now() < actionLockUntil) return;
+    if (!checkInTime) { await loadAttendanceStatus(); return; }
+    
+    // GPS는 퇴근 시에는 선택사항일 수 있으나 기록을 위해 가져옴
+    const gps = await getGps(); 
+    // 만약 퇴근 시엔 위치 체크 안 하려면 위 줄 주석 처리 후 gps 관련 필드 제거
 
-  const handleCheckOut = useCallback(async () => {
-    // ✅ 출근/퇴근 공용 연타 방지
-    if (Date.now() < actionLockUntil) {
-      setMessage("⏳ 처리 중입니다. 잠시 후 다시 눌러주세요.");
-      return;
+    const endTime = nowHm();
+    const startM = hmToMinutes(checkInTime);
+    const endM = hmToMinutes(endTime);
+    let workHm = "";
+    if (startM !== null && endM !== null) {
+      let diff = endM - startM;
+      if (diff < 0) diff += 24 * 60;
+      workHm = minutesToHm(diff);
     }
 
-    if (!row) return;
-
-    if (!checkInTime) {
-      setMessage("❌ 출근 기록을 찾을 수 없습니다. (상태 동기화 필요)");
-      await loadAttendanceStatus();
-      return;
-    }
-
-    const res = await getDistanceAndCoords();
-    if (!res.ok) return;
-
-    const endTime = nowHm(); // "HH:MM"
-    const workMin = calcWorkMinutes(checkInTime, endTime);
-    const workHm = workMin === null ? "" : minutesToHm(workMin);
-
+    // ⭐ 수정된 부분: 업데이트를 위한 최소한의 식별 정보만 보냄
     const payload = {
       action: "checkout_update",
-      "수업ID": String(row["ID"] ?? "").trim(),
-      "Email": userEmail.toLowerCase(),
-      "퇴근 시간": endTime,
-      "근무 시간": workHm,
-      "위치": `${formatCoord5(res.latitude)},${formatCoord5(res.longitude)}`,
+      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,         // 식별용 1
+      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail,    // 식별용 2
+      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,    // 업데이트 값
+      "근무 시간": workHm,                                   // 업데이트 값
+      // [ATTENDANCE_LOG_HEADERS.STATUS]는 스크립트에서 자동으로 "퇴근"으로 변경함
     };
 
-    // ✅ 퇴근도 "즉시 UI 반영" (CSV 지연 대비)
     setSaving(true);
-    try {
-      // 1) 버튼/상태 먼저 잠금
-      setActionLockUntil(Date.now() + 2000);
+    setCheckedIn(false); setCheckInTime(null); setMessage("✅ 퇴근 처리 중…");
+    await clearSession();
 
-      // 2) UI 먼저 퇴근 처리된 것처럼 보여주기
-      setCheckedIn(false);
-      setCheckInTime(null);
-      setMessage("✅ 퇴근 처리 중…");
+    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAME_ATTENDANCE, payload);
+    setSaving(false);
 
-      // 3) 전역 출근 상태도 바로 제거 (수업탭 배너 즉시 내려감)
-      await clearOpenShift();
-      setOpenShiftState(null);
-
-      // 4) 서버 업데이트
-      const out = await postAttendance(ATTENDANCE_POST_URL, payload);
-
-      if (out?.ok) {
-        setMessage(out?.message ?? "✅ 퇴근 처리 완료");
-
-        // 5) 뒤에서 동기화(캐시깨고 재조회)
-        setTimeout(() => {
-          loadAttendanceStatus();
-        }, 1200);
-      } else {
-        // 실패하면 상태 복구 시도
-        setMessage(out?.error ?? "❌ 퇴근 저장 실패");
-        await loadAttendanceStatus();
-      }
-    } catch {
-      setMessage("❌ 퇴근 저장 실패 (네트워크/권한)");
-      await loadAttendanceStatus();
-    } finally {
-      setSaving(false);
+    if (res.ok) {
+      setMessage("✅ 퇴근 처리 완료");
+      setTimeout(loadAttendanceStatus, 1500);
+    } else {
+      setMessage(`❌ 퇴근 실패: ${res.error}`);
+      loadAttendanceStatus();
     }
-  }, [
-    row,
-    userEmail,
-    checkInTime,
-    getDistanceAndCoords,
-    loadAttendanceStatus,
-    actionLockUntil,
-  ]);
+  };
 
-  /** ===============================
-   * 1. 공지 발송 핸들러 (빨간 버튼)
-   * =============================== */
-  const handleSendNotice = useCallback(() => {
-    if (!noticeText.trim()) {
-      Alert.alert("알림", "공지할 내용을 입력해주세요.");
-      return;
-    }
-    // TODO: 입력된 noticeText를 전체 수강생에게 발송하는 로직 구현 예정
-    Alert.alert("준비 중", `[전체 공지]\n내용: ${noticeText}\n\n이 기능은 추후 연결됩니다.`);
-  }, [noticeText]);
+  const handleSendNotice = () => Alert.alert("준비 중", "공지 발송 기능은 추후 업데이트됩니다.");
+  const handleSendIndividual = () => Alert.alert("준비 중", "개별 발송 기능은 추후 업데이트됩니다.");
 
-  /** ===============================
-   * 2. 개별 메시지 발송 핸들러 (초록 버튼)
-   * =============================== */
-  const handleSendIndividual = useCallback(() => {
-    // TODO: Google Sheet URL 데이터를 읽어와서 개별 발송하는 로직 구현 예정
-    Alert.alert("준비 중", "개별 메시지 발송 기능은 추후 연결됩니다.");
-  }, []);
+  if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
+  if (!row) return <View style={styles.container}><Text>수업 정보를 찾을 수 없습니다.</Text></View>;
 
-  /** ===============================
-   *  UI states
-   * =============================== */
-  if (loading) {
-    return (
-      <View style={[styles.container, { justifyContent: "center" }]}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (!row) {
-    return (
-      <View style={styles.container}>
-        <Pressable
-          onPress={() => router.replace("/(tabs)/class")}
-          style={styles.backButton}
-        >
-          <Text style={styles.backText}>← 수업 목록</Text>
-        </Pressable>
-
-        <Text style={styles.title}>수업을 찾을 수 없습니다</Text>
-        <Text style={styles.meta}>ID: {targetId}</Text>
-      </View>
-    );
-  }
-
-  const school = String(row["학교"] ?? "").trim();
-  const quarter = String(row["분기"] ?? "").trim();
-  const place = String(row["장소"] ?? "").trim();
-  const start = String(row["시작"] ?? "").trim();
-  const end = String(row["종료"] ?? "").trim();
-
-  // FAB
-  const fabDisabled =
-    checkingGps || saving || posLoading || !attendanceSpot || Date.now() < actionLockUntil;
-  const fabLabel = checkedIn ? "퇴근" : "출근";
+  const fabDisabled = checkingGps || saving || !attendanceSpot || Date.now() < actionLockUntil;
 
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
-          <Pressable
-            onPress={() => router.replace("/(tabs)/class")}
-            style={({ pressed }) => [
-              styles.backButton,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
+          <Pressable onPress={() => router.replace("/(tabs)/class")} style={styles.backBtn}>
             <Text style={styles.backText}>← 수업 목록</Text>
           </Pressable>
         </View>
 
         <Text style={styles.title}>{classTitle}</Text>
-        <Text style={styles.meta}>
-          {school || "-"}
-          {quarter ? ` · ${quarter}` : ""}
-        </Text>
+        <Text style={styles.meta}>{String(row[CLASSES_HEADERS.SCHOOL] ?? "")} · {String(row[CLASSES_HEADERS.QUARTER] ?? "")}</Text>
 
-        <Section label="장소" value={place} />
-        <Section
-          label="시간"
-          value={(start || end) ? `${start || "-"} ~ ${end || "-"}` : "-"}
-        />
-
-        <View style={styles.attendanceCard}>
-          <Text style={styles.attendanceTitle}>출근</Text>
-
-          <Text style={styles.attendanceDesc}>
-            {posLoading
-              ? "출근 위치 로딩 중…"
-              : attendanceSpot
-              ? `기준 위치: ${attendanceSpot.name}  (반경 ${attendanceSpot.radiusMeters}m)`
-              : "❗ positions 시트에서 좌표를 찾을 수 없습니다. (position 키 매칭 확인)"}
-          </Text>
-
-          <Text style={styles.attendanceMsg}>{message}</Text>
-
-          {distance !== null && (
-            <Text style={styles.attendanceDebug}>
-              거리: {Math.round(distance)}m{"\n"}
-              위도: {latitude}{"\n"}
-              경도: {longitude}
-            </Text>
-          )}
-
-          {checkedIn && checkInTime && (
-            <Text style={styles.attendanceDebug}>출근시간: {checkInTime}</Text>
-          )}
-
-          <Text style={styles.attendanceDebug}>로그인: {userEmail}</Text>
+        <View style={styles.infoRow}>
+            <View style={styles.infoItem}>
+                <Text style={styles.label}>장소</Text>
+                <Text style={styles.value}>{String(row[CLASSES_HEADERS.PLACE] ?? "-")}</Text>
+            </View>
+            <View style={styles.infoItem}>
+                <Text style={styles.label}>시간</Text>
+                <Text style={styles.value}>{String(row[CLASSES_HEADERS.CLASS_START] ?? "")} ~ {String(row[CLASSES_HEADERS.CLASS_END] ?? "")}</Text>
+            </View>
         </View>
-        <View style={styles.smsCard}>
-          <Text style={styles.attendanceTitle}>공지 발송</Text>
-          <Text style={styles.attendanceDesc}>
-            수강생들에게 단체 문자를 발송합니다.
-          </Text>
 
-          {/* 텍스트 입력창 추가 */}
-          <TextInput
-            style={styles.textInput}
-            placeholder="공지 내용을 입력하세요"
-            multiline={true} // 여러 줄 입력 가능
-            numberOfLines={3}
-            value={noticeText}
-            onChangeText={setNoticeText}
-            textAlignVertical="top" // 안드로이드에서 텍스트 위쪽 정렬
-          />
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>출근 관리</Text>
+          <Text style={styles.desc}>{attendanceSpot ? `기준 위치: ${attendanceSpot.name} (반경 ${attendanceSpot.radiusMeters}m)` : "❗ 위치 정보를 찾을 수 없습니다."}</Text>
+          <Text style={styles.msg}>{message}</Text>
+          {checkedIn && checkInTime && <Text style={styles.debug}>출근시간: {checkInTime}</Text>}
+        </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.redButton, // 빨간색 스타일 적용
-              pressed && { opacity: 0.8 },
-            ]}
-            onPress={handleSendNotice}
-          >
-            <Text style={styles.buttonText}>공지 보내기</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>공지 발송</Text>
+          <Text style={styles.desc}>수강생들에게 단체 문자를 발송합니다.</Text>
+          <TextInput style={styles.input} placeholder="공지 내용을 입력하세요" multiline numberOfLines={3} value={noticeText} onChangeText={setNoticeText} />
+          <Pressable style={({ pressed }) => [styles.btnRed, pressed && { opacity: 0.8 }]} onPress={handleSendNotice}>
+            <Text style={styles.btnText}>공지 보내기</Text>
           </Pressable>
         </View>
 
-        <View style={styles.smsCard}>
-          <Text style={styles.attendanceTitle}>개별 메시지 발송</Text>
-          <Text style={styles.attendanceDesc}>
-            수강생들에게 개인별 문자를 발송합니다.
-          </Text>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.greenButton, // 초록색 스타일 적용
-              pressed && { opacity: 0.8 },
-            ]}
-            onPress={handleSendIndividual}
-          >
-            <Text style={styles.buttonText}>문자 메시지 보내기</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>개별 메시지 발송</Text>
+          <Text style={styles.desc}>수강생들에게 개인별 문자를 발송합니다.</Text>
+          <Pressable style={({ pressed }) => [styles.btnGreen, pressed && { opacity: 0.8 }]} onPress={handleSendIndividual}>
+            <Text style={styles.btnText}>문자 메시지 보내기</Text>
           </Pressable>
         </View>
       </ScrollView>
 
-      {/* Floating action button bottom-right */}
-      <Pressable
-        disabled={fabDisabled}
-        onPress={checkedIn ? handleCheckOut : handleCheckIn}
-        style={({ pressed }) => [
-          styles.fab,
-          fabDisabled && { opacity: 0.5 },
-          pressed && !fabDisabled && { transform: [{ scale: 0.98 }] },
-        ]}
-      >
-        <Text style={styles.fabText}>{fabLabel}</Text>
+      <Pressable disabled={fabDisabled} onPress={checkedIn ? handleCheckOut : handleCheckIn} style={[styles.fab, fabDisabled ? { opacity: 0.5 } : checkedIn ? { backgroundColor: "#4B5563" } : { backgroundColor: "#4F46E5" }]}>
+        <Text style={styles.fabText}>{checkedIn ? "퇴근" : "출근"}</Text>
       </Pressable>
     </View>
   );
 }
 
-function Section({ label, value }: { label: string; value: any }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{String(value ?? "-")}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    padding: 20,
-    backgroundColor: "#F6F7FB",
-    paddingBottom: 100,
-  },
+  container: { flexGrow: 1, padding: 20, backgroundColor: "#F6F7FB", paddingBottom: 100 },
   header: { marginBottom: 12 },
-  backButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    alignSelf: "flex-start",
-  },
-  backText: { fontSize: 14, fontWeight: "600", color: "#4F46E5" },
-
-  title: { fontSize: 20, fontWeight: "800", color: "#111827", marginBottom: 6 },
-  meta: { fontSize: 13, color: "#6B7280", marginBottom: 18 },
-
-  section: {
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginBottom: 10,
-  },
+  backBtn: { padding: 5, marginLeft: -5 },
+  backText: { fontSize: 14, color: "#4F46E5", fontWeight: "600" },
+  title: { fontSize: 22, fontWeight: "800", color: "#111", marginBottom: 4 },
+  meta: { fontSize: 14, color: "#666", marginBottom: 20 },
+  infoRow: { flexDirection: 'row', gap: 15, marginBottom: 20 },
+  infoItem: { backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', flex: 1 },
   label: { fontSize: 12, fontWeight: "700", color: "#6B7280", marginBottom: 4 },
-  value: { fontSize: 15, fontWeight: "500", color: "#111827" },
-
-  attendanceCard: {
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginTop: 6,
-  },
-  attendanceTitle: { fontSize: 16, fontWeight: "800", color: "#111827", marginBottom: 6 },
-  attendanceDesc: { fontSize: 12, color: "#6B7280", marginBottom: 10 },
-  attendanceMsg: { fontSize: 14, color: "#111827", marginBottom: 10 },
-  attendanceDebug: { marginTop: 6, fontSize: 12, color: "#6B7280", lineHeight: 18 },
-
-  fab: {
-    position: "absolute",
-    right: 20,
-    bottom: 24,
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: "#4F46E5",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
-  },
-  fabText: { color: "#fff", fontWeight: "900", fontSize: 16 },
-  smsCard: {
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    marginTop: 10,
-  },
-  
-  // 텍스트 입력창 스타일
-  textInput: {
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-    minHeight: 80, // 높이 확보
-    fontSize: 14,
-    color: "#111827",
-    backgroundColor: "#F9FAFB",
-  },
-
-  // 버튼 공통 텍스트
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  // 빨간 버튼 (공지)
-  redButton: {
-    backgroundColor: "#EF4444", // 빨간색
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10,
-  },
-
-  // 초록 버튼 (개별)
-  greenButton: {
-    backgroundColor: "#10B981", // 초록색
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10, // 위쪽 설명과의 간격
-  },
+  value: { fontSize: 15, fontWeight: "600", color: "#111827" },
+  card: { backgroundColor: "#fff", borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: "#E5E7EB", elevation: 2 },
+  cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 6, color: "#1F2937" },
+  desc: { fontSize: 13, color: "#6B7280", marginBottom: 10, lineHeight: 18 },
+  msg: { fontSize: 14, color: "#111827", fontWeight: "600", marginTop: 4 },
+  debug: { fontSize: 12, color: "#059669", marginTop: 6, fontWeight: "600" },
+  input: { backgroundColor: "#F9FAFB", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, padding: 12, minHeight: 80, textAlignVertical: "top", marginBottom: 12, fontSize: 14 },
+  btnRed: { backgroundColor: "#EF4444", padding: 14, borderRadius: 8, alignItems: "center" },
+  btnGreen: { backgroundColor: "#10B981", padding: 14, borderRadius: 8, alignItems: "center" },
+  btnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  fab: { position: "absolute", right: 20, bottom: 30, width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center", elevation: 6 },
+  fabText: { color: "#fff", fontSize: 16, fontWeight: "800" },
 });

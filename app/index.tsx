@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons'; // 아이콘 사용
 
 import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged as onWebAuthStateChanged, signOut } from 'firebase/auth';
 import { webAuth } from '../firebaseConfig';
 
@@ -60,7 +59,7 @@ export default function LoginScreen() {
       } else {
         await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
         const response = await GoogleSignin.signIn();
-        const idToken = response.data?.idToken || response.idToken;
+        const idToken = response.data?.idToken;
 
         if (!idToken) throw new Error('Google ID Token 없음');
 
@@ -101,31 +100,11 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: '#fff' 
-  },
-  title: { 
-    fontSize: 24, 
-    fontWeight: 'bold', 
-    marginBottom: 40,
-    color: '#333'
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 40, color: '#333' },
   button: { 
-    backgroundColor: '#4285F4', 
-    paddingVertical: 14, 
-    paddingHorizontal: 30, 
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    elevation: 3, // 안드로이드 그림자
+    backgroundColor: '#4285F4', paddingVertical: 14, paddingHorizontal: 30, borderRadius: 8,
+    flexDirection: 'row', alignItems: 'center', elevation: 3 
   },
-  buttonText: { 
-    color: 'white', 
-    fontSize: 16, 
-    fontWeight: '600',
-    marginLeft: 10 
-  },
+  buttonText: { color: 'white', fontSize: 16, fontWeight: '600', marginLeft: 10 },
 });

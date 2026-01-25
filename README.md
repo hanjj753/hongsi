@@ -62,9 +62,6 @@ npx expo start --web
 ```
 2. 끝내고 싶으면 ```Ctrl+C```
 
-## 문자 테스트 시트 API 주소
-REMOVED_PRIVATE_SCRIPT_URL
-
 ## 앱 이름 변경
 1. app.json에서 {expo : {"name": ""}} 부분을 직접 변경
 2. android/app/src/main/res/values/strings.xml에서 <string name="app_name">에 있는 내용 변경
@@ -77,10 +74,13 @@ import { FontAwesome } from '@expo/vector-icons';
 <FontAwesome name="google" size={24} color="black" />
 ```
 
-## 구글 로그인 웹 클라이언트 ID
+## 구글 시트 Apps Script 배포하기
 - 배포하는 방법
 1. [확장 프로그램] - [Apps Script] 로 들어간다.
 2. 다른 코드는 건드리지 않고 오른쪽 위의 [배포]-[새 배포]를 누른다.
 3. [유형 선택]에서 [웹 앱]을, [다음 사용자 버전으로 실행]: [나], [액세스할 수 있는 사용자]: [모든 사용자] 로 설정하고 배포한다.
-4. 나온 URL을 [수업 생성 시트]를 열어 추가해준다.
+4. 나온 URL을 [수업 생성 시트]를 열어 추가해준다. 
+5. Apps Script의 코드에 변화가 있다면 [새 배포]를 해주어야 한다.
+
+### 구글 로그인 웹 클라이언트 ID
 - 804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com

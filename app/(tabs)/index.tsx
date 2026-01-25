@@ -1,17 +1,22 @@
+// [홈] 탭
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert, ScrollView, RefreshControl, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Picker } from '@react-native-picker/picker';
 
+// Firebase & Auth
 import auth from '@react-native-firebase/auth';
 import { signOut } from 'firebase/auth';
-import { webAuth } from '../../firebaseConfig';
+import { webAuth } from '../../firebaseConfig'; // 여긴 ../../가 맞을 수 있습니다 (프로젝트 구조에 따라 확인 필요)
 
-import { Picker } from '@react-native-picker/picker';
-import { fetchSheetData } from "../utils/googleSheet_csv";
+// Utils & Config
+import { getCurrentUserEmail } from '../../utils/currentUser';
+import { fetchSheetData } from "../../utils/googleSheet_csv";
+import { CSV_URLS, ATTENDANCE_LOG_HEADERS } from "../../utils/sheetConfig";
 
-const WORK_CSV_URL =
-  "REMOVED_PRIVATE_SHEET_URL";
-
+// ==========================================
+// Types & Helpers
+// ==========================================
 type WorkRow = {
   date: string;
   shift: string;
@@ -19,19 +24,12 @@ type WorkRow = {
   end: string;
   work: string;
   email: string;
+  _dt?: Date;
 };
 
 function parseSheetDate(dateStr: string): Date | null {
-  // "2025. 12. 3" / "2025.12.03" / "2025. 1. 13" 모두 처리
-  const cleaned = String(dateStr || "").replace(/\s/g, ""); // 공백 제거
-  const m = cleaned.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})$/);
-  if (!m) return null;
-
-  const y = Number(m[1]);
-  const mo = Number(m[2]) - 1;
-  const d = Number(m[3]);
-
-  const dt = new Date(y, mo, d);
+  const cleaned = String(dateStr || "").replace(/[\s\.]/g, "-").replace(/-+/g, "-"); 
+  const dt = new Date(cleaned);
   return isNaN(dt.getTime()) ? null : dt;
 }
 
@@ -43,151 +41,110 @@ function toYYMM(dt: Date): string {
 
 function durationToSeconds(s: string): number {
   const parts = String(s || "").split(':').map(v => v.trim()).filter(Boolean);
-  if (parts.length === 3) {
-    const [h, m, sec] = parts.map(Number);
-    return (h || 0) * 3600 + (m || 0) * 60 + (sec || 0);
-  }
-  if (parts.length === 2) {
-    const [h, m] = parts.map(Number);
-    return (h || 0) * 3600 + (m || 0) * 60;
-  }
+  if (parts.length === 3) return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  if (parts.length === 2) return Number(parts[0]) * 3600 + Number(parts[1]) * 60;
   return 0;
 }
 
 function secondsToHMS(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+// ==========================================
+// Component
+// ==========================================
 export default function HomeScreen() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-
   const [rows, setRows] = useState<WorkRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
   const [selectedMonth, setSelectedMonth] = useState<string>("");
 
-  // ✅ 로그인 유저 세팅
+  // 1. 로그인 유저 확인
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      const currentUser = webAuth.currentUser;
-      if (currentUser) setUser(currentUser);
-    } else {
-      const currentUser = auth().currentUser;
-      if (currentUser) setUser(currentUser);
-    }
+    const u = Platform.OS === 'web' ? webAuth.currentUser : auth().currentUser;
+    setUser(u);
   }, []);
 
-  // ✅ ClassScreen과 동일: load() 함수로 CSV 가져오기
+  // 2. 근무 기록 로드
   const load = useCallback(async () => {
-    if (!user?.email) return;
+    const email = getCurrentUserEmail();
+    if (!email) return;
 
-    const data = await fetchSheetData(WORK_CSV_URL);
+    // sheetConfig의 ATTENDANCE_LOG URL 사용
+    const data = await fetchSheetData(CSV_URLS.ATTENDANCE_LOG);
 
-    // ✅ CSV 헤더명을 "근무 기록지" 시트 헤더와 동일하게 사용
-    // 스샷 기준: 근무 일자 / 반 / Email / 출근 시간 / 퇴근 시간 / 근무 시간
-    const cleaned = (data || []).filter((r: any) => r && (r["근무 일자"] || r["Email"]));
-
-    // ✅ "나" 필터링 + 필요한 필드만 표준화
-    const myRows: WorkRow[] = cleaned
-      .filter((r: any) => String(r["Email"] ?? "").trim().toLowerCase() === user.email.toLowerCase())
+    const myEmail = email.trim().toLowerCase();
+    
+    const myRows: WorkRow[] = (data || [])
+      .filter((r: any) => {
+        const rowEmail = (r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ||  "").trim().toLowerCase();
+        
+        return rowEmail === myEmail;
+      })
       .map((r: any) => ({
-        date: String(r["근무 일자"] ?? "").trim(),
-        shift: String(r["반"] ?? "").trim(),
-        start: String(r["출근 시간"] ?? "").trim(),
-        end: String(r["퇴근 시간"] ?? "").trim(),
-        work: String(r["근무 시간"] ?? "").trim(),
-        email: String(r["Email"] ?? "").trim(),
+        date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
+        shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
+        start: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim(),
+        end: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim(),
+        work: String(r["근무 시간"] ?? "").trim(), 
+        email: myEmail,
+        _dt: parseSheetDate(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]) ?? undefined
       }))
-      // 날짜 파싱 가능한 것만
-      .map(r => ({ ...r, _dt: parseSheetDate(r.date) as any }))
-      .filter((r: any) => r._dt)
-      // 최신순 정렬
-      .sort((a: any, b: any) => (b._dt as Date).getTime() - (a._dt as Date).getTime())
-      .map(({ _dt, ...rest }: any) => rest);
-
-      // console.log("raw rows count:", (data || []).length);
-      // console.log("cleaned count:", cleaned.length);
-      // console.log("first row:", cleaned[0]);
-      // console.log("keys:", cleaned[0] ? Object.keys(cleaned[0]) : []);
-      // console.log("matched count:", myRows.length);
+      .filter(r => r._dt)
+      .sort((a, b) => (b._dt!.getTime() - a._dt!.getTime()));
 
     setRows(myRows);
-  }, [user?.email]);
+  }, []);
 
-  // ✅ 처음 로드
   useEffect(() => {
-    (async () => {
-      try {
-        await load();
-      } catch (e: any) {
-        Alert.alert("근무 데이터 불러오기 실패", e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [load]);
+    if (user) {
+      load().catch(e => console.error(e)).finally(() => setLoading(false));
+    }
+  }, [user, load]);
 
-  // ✅ 당겨서 새로고침
   const onRefresh = async () => {
     setRefreshing(true);
-    try {
-      await load();
-    } catch (e: any) {
-      Alert.alert("새로고침 실패", e.message);
-    } finally {
-      setRefreshing(false);
-    }
+    await load();
+    setRefreshing(false);
   };
 
-  // ✅ monthOptions = 내가 근무한 달만
+  // 3. 월별 필터 옵션
   const monthOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const r of rows) {
-      const dt = parseSheetDate(r.date);
-      if (!dt) continue;
-      set.add(toYYMM(dt));
-    }
-    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+    rows.forEach(r => { if (r._dt) set.add(toYYMM(r._dt)); });
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [rows]);
 
-  // ✅ 기본 선택 월 자동 지정
   useEffect(() => {
     if (!selectedMonth && monthOptions.length > 0) {
       setSelectedMonth(monthOptions[0]);
     }
   }, [monthOptions, selectedMonth]);
 
-  // ✅ 선택 월 필터 (로컬)
+  // 4. 선택된 월 요약
   const monthRows = useMemo(() => {
     if (!selectedMonth) return [];
-    return rows.filter(r => {
-      const dt = parseSheetDate(r.date);
-      if (!dt) return false;
-      return toYYMM(dt) === selectedMonth;
-    });
+    return rows.filter(r => r._dt && toYYMM(r._dt) === selectedMonth);
   }, [rows, selectedMonth]);
 
   const monthSummary = useMemo(() => {
-    const count = monthRows.length;
-    const totalSeconds = monthRows.reduce((acc, r) => acc + durationToSeconds(r.work || "0:00:00"), 0);
+    const totalSeconds = monthRows.reduce((acc, r) => acc + durationToSeconds(r.work), 0);
     return {
-      workCount: count,
-      totalWork: secondsToHMS(totalSeconds),
-      expectedPay: "-" // 계산 안 함
+      count: monthRows.length,
+      totalTime: secondsToHMS(totalSeconds),
     };
   }, [monthRows]);
 
+  // 5. 로그아웃
   const handleLogout = async () => {
     try {
       if (Platform.OS === 'web') {
         await signOut(webAuth);
         window.location.href = '/';
-        return;
       } else {
         await auth().signOut();
         if (router.canDismiss()) router.dismissAll();
@@ -198,270 +155,115 @@ export default function HomeScreen() {
     }
   };
 
-  const titleMonth = selectedMonth || "-- --";
-
-  if (loading) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center' }]}>
-        <ActivityIndicator />
-      </View>
-    );
+  if (loading && !refreshing) {
+    return <View style={styles.center}><ActivityIndicator /></View>;
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
+    <ScrollView 
+      contentContainerStyle={styles.container} 
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       <Text style={styles.headerTitle}>마이 페이지</Text>
 
-      {user ? (
-        <View style={styles.profileCard}>
+      {user && (
+        <View style={styles.card}>
           {user.photoURL && <Image source={{ uri: user.photoURL }} style={styles.avatar} />}
-
-          {/* 1행: 레이블들 (이름 · 이메일) */}
-          <View style={styles.rowLabels}>
-            <Text style={styles.labelRow}>이름</Text>
-            <Text style={styles.labelRow}>이메일</Text>
-          </View>
-          {/* 2행: 상세 내용 (이름값 · 이메일값) */}
-          <View style={styles.rowValues}>
-            <Text style={styles.valueRow}>{user.displayName || '이름 없음'}</Text>
-            <Text style={styles.valueRow}>{user.email}</Text>
+          <View style={styles.row}>
+            <InfoItem label="이름" value={user.displayName || "이름 없음"} />
+            <InfoItem label="이메일" value={user.email} />
           </View>
 
-          {/* 월 선택 */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>월 선택</Text>
-
-            {monthOptions.length === 0 ? (
-              <Text style={styles.loadingText}>근무 기록이 없습니다.</Text>
-            ) : (
-              <View style={styles.pickerBox}>
-                <Picker
-                  selectedValue={selectedMonth}
-                  onValueChange={(v) => setSelectedMonth(String(v))}
-                  style={styles.picker}
-                >
-                  {monthOptions.map(m => (
-                    <Picker.Item key={m} label={m} value={m} />
-                  ))}
-                </Picker>
-              </View>
-            )}
+            <View style={styles.pickerBox}>
+              <Picker selectedValue={selectedMonth} onValueChange={setSelectedMonth} style={{ height: 50 }}>
+                {monthOptions.map(m => <Picker.Item key={m} label={m} value={m} />)}
+              </Picker>
+            </View>
           </View>
 
-          {/* 근무 요약 */}
-          {monthOptions.length > 0 && (
+          {selectedMonth ? (
             <View style={styles.section}>
-              <Text style={styles.tableTitle}>{titleMonth} 근무 요약</Text>
-
+              <Text style={styles.tableTitle}>{selectedMonth} 근무 요약</Text>
               <View style={styles.table}>
-                <View style={styles.rowHeader}>
-                  <Text style={[styles.cell, styles.headerCell]}>근무 시간</Text>
-                  <Text style={[styles.cell, styles.headerCell]}>근무 횟수</Text>
-                  <Text style={[styles.cell, styles.headerCell]}>예상 급여</Text>
+                <View style={styles.trHead}>
+                  <Text style={styles.th}>총 근무 시간</Text>
+                  <Text style={styles.th}>근무 횟수</Text>
                 </View>
-
-                <View style={styles.row}>
-                  <Text style={styles.cell}>{monthSummary.totalWork}</Text>
-                  <Text style={styles.cell}>{monthSummary.workCount}</Text>
-                  <Text style={styles.cell}>{monthSummary.expectedPay}</Text>
+                <View style={styles.tr}>
+                  <Text style={styles.td}>{monthSummary.totalTime}</Text>
+                  <Text style={styles.td}>{monthSummary.count}회</Text>
                 </View>
               </View>
             </View>
-          )}
+          ) : null}
 
-          {/* 근무 기록 표 */}
-          {monthOptions.length > 0 && (
+          {selectedMonth ? (
             <View style={styles.section}>
-              <Text style={styles.tableTitle}>{titleMonth} 근무 기록</Text>
-
+              <Text style={styles.tableTitle}>상세 기록</Text>
               <View style={styles.table}>
-                <View style={styles.rowHeader}>
-                  <Text style={[styles.cell2, styles.headerCell]}>근무 일자</Text>
-                  <Text style={[styles.cell2, styles.headerCell]}>반</Text>
-                  <Text style={[styles.cell2, styles.headerCell]}>근무 시간</Text>
-                  <Text style={[styles.cell2, styles.headerCell]}>출근 시간</Text>
-                  <Text style={[styles.cell2, styles.headerCell]}>퇴근 시간</Text>
+                <View style={styles.trHead}>
+                  <Text style={[styles.th, { flex: 0.8 }]}>날짜</Text>
+                  <Text style={[styles.th, { flex: 1.2 }]}>수업</Text>
+                  <Text style={styles.th}>시간</Text>
                 </View>
-
-                {/* ✅ 여기부터: 표 내용만 고정 높이 + 내부 스크롤 */}
-                <View style={styles.tableBodyBox}>
-                  {monthRows.length === 0 ? (
-                    <View style={styles.row}>
-                      <Text style={[styles.cellFull, styles.loadingText]}>해당 월 기록이 없습니다.</Text>
+                {monthRows.length === 0 ? (
+                  <Text style={styles.noData}>기록이 없습니다.</Text>
+                ) : (
+                  monthRows.map((r, i) => (
+                    <View key={i} style={styles.tr}>
+                      <Text style={[styles.td, { flex: 0.8 }]}>{r.date}</Text>
+                      <Text style={[styles.td, { flex: 1.2 }]}>{r.shift}</Text>
+                      <Text style={styles.td}>
+                        {r.end ? `${r.start}~${r.end}` : `${r.start} (근무중)`}
+                      </Text>
                     </View>
-                  ) : (
-                    <ScrollView
-                      style={styles.tableBodyScroll}
-                      nestedScrollEnabled
-                      showsVerticalScrollIndicator
-                    >
-                      {monthRows.map((r, idx) => (
-                        <View style={styles.row} key={`${r.date}-${idx}`}>
-                          <Text style={styles.cell2}>{r.date}</Text>
-                          <Text style={styles.cell2}>{r.shift}</Text>
-                          <Text style={styles.cell2}>{r.work}</Text>
-                          <Text style={styles.cell2}>{r.start}</Text>
-                          <Text style={styles.cell2}>{r.end}</Text>
-                        </View>
-                      ))}
-                    </ScrollView>
-                  )}
-                </View>
-                {/* ✅ 여기까지 */}
+                  ))
+                )}
               </View>
             </View>
-          )}
+          ) : null}
 
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Text style={styles.logoutText}>로그아웃</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <Text>로그인 정보를 불러오는 중...</Text>
       )}
     </ScrollView>
   );
 }
 
+const InfoItem = ({ label, value }: { label: string, value: string }) => (
+  <View style={{ flex: 1, alignItems: 'center' }}>
+    <Text style={styles.label}>{label}</Text>
+    <Text style={styles.value} numberOfLines={1}>{value}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    color: '#333',
-  },
-  profileCard: {
-    width: '100%',
-    maxWidth: 520,
-    backgroundColor: 'white',
-    borderRadius: 15,
-    padding: 20,
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginBottom: 12,
-    backgroundColor: '#eee',
-  },
-  label: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 4,
-    marginTop: 10,
-  },
-  info: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
+  container: { flexGrow: 1, backgroundColor: '#f5f5f5', padding: 20, alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 20, color: '#333' },
+  
+  card: { width: '100%', maxWidth: 500, backgroundColor: 'white', borderRadius: 16, padding: 20, elevation: 3 },
+  avatar: { width: 80, height: 80, borderRadius: 40, alignSelf: 'center', marginBottom: 16, backgroundColor: '#eee' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  label: { fontSize: 13, color: '#888', marginBottom: 4 },
+  value: { fontSize: 16, fontWeight: '600', color: '#333' },
 
-  /* 새 row 스타일: 이름/이메일을 가로로 배치 */
-  rowLabels: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    marginBottom: 4,
-    paddingHorizontal: 6,
-  },
-  rowValues: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 6,
-  },
-  labelRow: {
-    flex: 1,
-    fontSize: 13,
-    color: '#888',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  valueRow: {
-    flex: 1,
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  section: { marginTop: 24 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#555', marginBottom: 8 },
+  pickerBox: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden' },
+  
+  tableTitle: { fontSize: 16, fontWeight: '700', color: '#222', marginBottom: 8 },
+  table: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, overflow: 'hidden' },
+  trHead: { flexDirection: 'row', backgroundColor: '#f9f9f9', paddingVertical: 10 },
+  tr: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#eee', paddingVertical: 12 },
+  th: { flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '700', color: '#555' },
+  td: { flex: 1, textAlign: 'center', fontSize: 13, color: '#333' },
+  noData: { textAlign: 'center', padding: 20, color: '#999' },
 
-  section: { width: '100%', marginTop: 18 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 8 },
-  loadingText: { color: '#777', fontSize: 13 },
-
-  pickerBox: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-  },
-  picker: { width: '100%', height: 44 },
-
-  tableTitle: { fontSize: 16, fontWeight: '800', color: '#222', marginBottom: 10 },
-  table: { borderWidth: 1, borderColor: '#e5e5e5', borderRadius: 12, overflow: 'hidden' },
-  rowHeader: { flexDirection: 'row', backgroundColor: '#f2f2f2' },
-  row: { flexDirection: 'row', backgroundColor: '#fff' },
-
-  cell: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    fontSize: 13,
-    textAlign: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#eee',
-  },
-  cell2: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    fontSize: 12,
-    textAlign: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#eee',
-  },
-  cellFull: {
-    flex: 5,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  headerCell: { fontWeight: '800', color: '#333' },
-
-  logoutButton: {
-    marginTop: 20,
-    backgroundColor: '#FF5A5F',
-    paddingVertical: 12,
-    paddingHorizontal: 40,
-    borderRadius: 8,
-  },
+  logoutBtn: { marginTop: 30, backgroundColor: '#FF5A5F', padding: 14, borderRadius: 10, alignItems: 'center' },
   logoutText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-
-  tableBodyBox: {
-    height: 150,   // 원하는 표의 최대 높이(px).
-  },
-
-  tableBodyScroll: {
-    flexGrow: 1,      // 내부 ScrollView가 무한 확장되지 않게
-  },
 });
