@@ -13,16 +13,18 @@ import { getCurrentUserEmail } from "../../utils/currentUser";
 import DirectSms from "../../utils/smsSender";
 import { getClassUrls } from "../../utils/classInfo";
 
+// PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS, 
-  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES } from "../../config/sheetConfig";
-import { ADMIN_DEVICE_IDS } from "../../config/adminConfig";
+  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, PERMISSION_HEADERS } from "../../config/sheetConfig";
+// import { ADMIN_DEVICE_IDS } from "../../config/adminConfig"; 
+
 import { INDIVIDUAL_MESSAGE_TEMPLATE } from "../../config/messageConfig";
 
 // Constants
-const WARN_RADIUS_METERS = 30; // 30m 이내 정상
-const ACCEPT_RADIUS_METERS = 100; // 100m 이내 인정(경고)
+const WARN_RADIUS_METERS = 30; 
+const ACCEPT_RADIUS_METERS = 100;
 
-// Helpers
+// ... (Helpers 함수들은 그대로 유지) ...
 const hmToMinutes = (hm: string) => {
   const m = String(hm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
@@ -78,15 +80,45 @@ export default function ClassDetailScreen() {
 
   const [isAdminDevice, setIsAdminDevice] = useState(false);
 
+  // 시트 데이터를 기반으로 Admin 권한 확인
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      const androidId = Application.getAndroidId();
-      if (ADMIN_DEVICE_IDS.includes(androidId)) {
-        setIsAdminDevice(true);
-      }
-    }
-  }, []);
+    const checkAdmin = async () => {
+      // 안드로이드가 아니면 패스 (문자 발송 기능은 안드로이드 전용)
+      if (Platform.OS !== 'android') return;
+      if (!userEmail) return;
 
+      try {
+        const androidId = Application.getAndroidId();
+        if (!androidId) return;
+
+        // 1. 권한 시트 CSV 가져오기
+        const data = await fetchSheetData(CSV_URLS.PERMISSIONS);
+        if (!Array.isArray(data)) return;
+
+        // 2. 내 이메일 & Device ID가 일치하는 행 찾기
+        const myRecord = data.find((r: any) => {
+           const sheetEmail = String(r[PERMISSION_HEADERS.EMAIL] || "").trim().toLowerCase();
+           const sheetDeviceId = String(r[PERMISSION_HEADERS.DEVICE_ID] || "").trim();
+           return sheetEmail === userEmail.toLowerCase() && sheetDeviceId === androidId;
+        });
+
+        // 3. 권한이 'Admin'인지 확인
+        if (myRecord) {
+          const role = String(myRecord[PERMISSION_HEADERS.ROLE] || "").trim();
+          if (role === 'Admin') {
+            setIsAdminDevice(true);
+          }
+        }
+      } catch (e) {
+        console.error("Admin check failed", e);
+      }
+    };
+
+    checkAdmin();
+  }, [userEmail]); // userEmail이 로드되면 실행
+
+  // ... (나머지 코드들은 기존과 동일합니다. 아래 코드는 그대로 두세요) ...
+  
   // 1. 데이터 로드
   useEffect(() => {
     (async () => {
@@ -139,7 +171,6 @@ export default function ClassDetailScreen() {
 
     const active = myLog.find((r: any) => {
       const st = String(r[ATTENDANCE_LOG_HEADERS.STATUS] ?? "").trim();
-      // 퇴근 시간이 비어있고 상태가 출근인 경우
       return st === "출근";
     });
 
@@ -187,7 +218,7 @@ export default function ClassDetailScreen() {
       action: "checkin", 
       [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: todayYmd(),
       [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
-      [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(), // ✅ 추가됨: 분기 정보
+      [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(),
       [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
       [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
       [ATTENDANCE_LOG_HEADERS.WORKERS]: String(row![CLASSES_HEADERS.WORKERS] ?? "").trim(),
@@ -218,7 +249,6 @@ export default function ClassDetailScreen() {
     if (Date.now() < actionLockUntil) return;
     if (!checkInTime) { await loadAttendanceStatus(); return; }
     
-    // GPS는 퇴근 시에는 선택사항일 수 있으나 기록을 위해 가져옴
     const gps = await getGps(); 
 
     const endTime = nowHm();
@@ -236,7 +266,7 @@ export default function ClassDetailScreen() {
       [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
       [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail, 
       [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,
-      "근무 시간": workHm, // Apps Script는 "근무 시간" 컬럼을 사용
+      "근무 시간": workHm,
     };
 
     setSaving(true);
@@ -262,7 +292,7 @@ export default function ClassDetailScreen() {
     }
     
     setSendingNotice(true);
-    setNoticeMsg(""); // 메시지 초기화
+    setNoticeMsg(""); 
 
     try {
       const urls = await getClassUrls(targetId);
@@ -301,11 +331,8 @@ export default function ClassDetailScreen() {
 
       await Promise.all(promises);
       
-      // ✅ 성공 시 화면에 메시지 표시
       setNoticeText(""); 
       setNoticeMsg(`${targets.length}명에게 등록 완료! (상태: unsent)`);
-      
-      // 3초 뒤에 메시지 사라지게 하기
       setTimeout(() => setNoticeMsg(""), 3000);
 
     } catch (error: any) {
@@ -334,8 +361,6 @@ export default function ClassDetailScreen() {
       }
 
       const rawRows = await fetchClassSheetRaw(urls.sheetUrl);
-
-      // ID가 있는 행만 필터링
       const targets = rawRows.filter(r => r[0] && r[0].trim() !== "");
 
       if (targets.length === 0) {
@@ -383,7 +408,7 @@ export default function ClassDetailScreen() {
       await Promise.all(promises);
 
       setIndividualMsg(`${session}차시 메시지 등록 완료!`);
-      setTimeout(() => setIndividualMsg(""), 3000); // 3초 뒤 사라짐
+      setTimeout(() => setIndividualMsg(""), 3000); 
       setSessionNum("");
 
     } catch (error) {
@@ -395,7 +420,6 @@ export default function ClassDetailScreen() {
   };
 
   const handleDirectSms = async () => {
-    // 1. [중요] 안드로이드 문자 권한 요청
     if (Platform.OS === 'android') {
       const granted = await PermissionsAndroid.request(
         PermissionsAndroid.PERMISSIONS.SEND_SMS,
@@ -424,7 +448,6 @@ export default function ClassDetailScreen() {
           onPress: async () => {
             setSaving(true);
             try {
-              // 2. 메시지 로그 시트 데이터 가져오기
               const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAMES.MESSAGE_LOG}`);
               const data = await response.json();
               
@@ -433,11 +456,9 @@ export default function ClassDetailScreen() {
                 return;
               }
 
-              // 3. 필터링: 'unsent' 상태 AND '현재 수업 ID'
               const unsentMessages = data.filter((row: any) => {
                 const isUnsent = row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent";
                 const isSameClass = String(row[MESSAGE_LOG_HEADERS.CLASS_ID]) === String(targetId);
-                
                 return isUnsent && isSameClass;
               });
 
@@ -447,7 +468,6 @@ export default function ClassDetailScreen() {
                 return;
               }
 
-              // 4. 문자 발송 (DirectSms)
               let sentCount = 0;
               for (const msg of unsentMessages) {
                 const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE];
@@ -462,11 +482,9 @@ export default function ClassDetailScreen() {
                     console.error("SMS 전송 실패:", phone, e);
                   }
                 }
-                // 통신사 스팸 차단 방지 (0.5초 딜레이)
                 await new Promise(resolve => setTimeout(resolve, 500));
               }
 
-              // 5. 시트 상태 업데이트 요청 (이 수업 ID만 sent로 변경)
               const updatePayload = {
                 sheetName: SHEET_NAMES.MESSAGE_LOG,
                 action: "update_status",
@@ -624,7 +642,7 @@ const styles = StyleSheet.create({
   
   btnRed: { backgroundColor: "#EF4444", padding: 14, borderRadius: 8, alignItems: "center" },
   btnGreen: { backgroundColor: "#10B981", padding: 14, borderRadius: 8, alignItems: "center" },
-  btnBlue: { backgroundColor: "#3B82F6", padding: 14, borderRadius: 8, alignItems: "center" }, // 파란색 버튼 스타일 추가
+  btnBlue: { backgroundColor: "#3B82F6", padding: 14, borderRadius: 8, alignItems: "center" }, 
   btnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   
   fab: { position: "absolute", right: 20, bottom: 30, width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center", elevation: 6 },

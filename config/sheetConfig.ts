@@ -13,6 +13,8 @@ export const CSV_URLS = {
     // 조교 정보 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보]
     ASSISTANT_INFO : "REMOVED_PRIVATE_SHEET_URL",
 
+    // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
+    PERMISSIONS : "REMOVED_PRIVATE_SHEET_URL",
 };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
@@ -24,6 +26,7 @@ export const API_URLS = {
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
     MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
 
+    // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
     ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
 
 };
