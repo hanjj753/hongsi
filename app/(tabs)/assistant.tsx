@@ -1,44 +1,326 @@
 // [조교] 탭
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+
+// Config & Utils
+import { fetchSheetData } from "../../utils/googleSheet_csv";
+import { CSV_URLS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
+
+type Assistant = {
+  name: string;
+  rawPosition: string;
+  positions: string[];
+  phone: string;
+  email: string;
+  roles: string[]; 
+  status: string;
+  startDate: string;
+  isInactive: boolean;
+};
 
 export default function AssistantScreen() {
-  return (
-    <View style={styles.container}>
-      <Ionicons name="construct-outline" size={60} color="#CBD5E1" style={{ marginBottom: 16 }} />
-      <Text style={styles.title}>조교 기능 이동 안내</Text>
-      <Text style={styles.desc}>
-        기존의 조교 출석 기능은{"\n"}
-        <Text style={styles.highlight}>'수업' 탭의 각 수업 상세 화면</Text>으로{"\n"}
-        통합되었습니다.
-      </Text>
+  const [allData, setAllData] = useState<Assistant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [showActive, setShowActive] = useState(true);     // 현역
+  const [showInactive, setShowInactive] = useState(false); // 비근무
+  const [showField, setShowField] = useState(true);       // 현장
+  const [showMaterial, setShowMaterial] = useState(true); // 자료
+
+  const loadData = useCallback(async () => {
+    try {
+      const data = await fetchSheetData(CSV_URLS.ASSISTANT_INFO);
+      
+      const cleanData = data.map((row: any) => {
+        const rawPos = row[ASSISTANT_HEADERS.POSITION] || "";
+        const rawRole = row[ASSISTANT_HEADERS.ROLE] || "";
+        const status = row[ASSISTANT_HEADERS.STATUS] || "";
+        
+        return {
+          name: row[ASSISTANT_HEADERS.NAME],
+          rawPosition: rawPos,
+          positions: rawPos.split(",").map((s: string) => s.trim()).filter(Boolean),
+          phone: row[ASSISTANT_HEADERS.PHONE],
+          email: row[ASSISTANT_HEADERS.EMAIL],
+          roles: rawRole.split(",").map((s: string) => s.trim()).filter(Boolean),
+          status: status,
+          startDate: row[ASSISTANT_HEADERS.START_DATE] || "",
+          isInactive: status.includes("비근무"),
+        };
+      });
+
+      setAllData(cleanData);
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert("오류", "정보를 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
+
+  const { ceos, managers, assistants } = useMemo(() => {
+    const groupCeo: Assistant[] = [];
+    const groupManager: Assistant[] = [];
+    const groupAssistant: Assistant[] = [];
+
+    allData.forEach(staff => {
+      // 1. CEO/실장/조교 그룹 분류
+      if (staff.rawPosition.includes("CEO")) {
+        groupCeo.push(staff);
+      } else if (staff.rawPosition.includes("실장")) {
+        groupManager.push(staff);
+      } else {
+        // 2. 조교 그룹에 대해서만 필터 적용
+        
+        // (1) 상태 필터 (현역/비근무)
+        const isActive = !staff.isInactive;
+        if (isActive && !showActive) return;      
+        if (!isActive && !showInactive) return;
+
+        // (2) 역할 필터 (현장/자료)
+        // 현장 체크됨 AND 이 사람에게 현장 역할이 있음 -> 통과
+        // 자료 체크됨 AND 이 사람에게 자료 역할이 있음 -> 통과
+        // 둘 다 해당 없으면 -> 탈락
+        const hasField = staff.roles.includes("현장");
+        const hasMaterial = staff.roles.includes("자료");
+        
+        // 역할 데이터가 아예 없는 경우(기타)는 어떻게 할지? 일단 표시.
+        // 역할 데이터가 있는데 체크박스 조건에 안 맞으면 제외.
+        if (staff.roles.length > 0) {
+            const matchField = showField && hasField;
+            const matchMaterial = showMaterial && hasMaterial;
+            if (!matchField && !matchMaterial) return;
+        }
+
+        groupAssistant.push(staff);
+      }
+    });
+
+    return { ceos: groupCeo, managers: groupManager, assistants: groupAssistant };
+  }, [allData, showActive, showInactive, showField, showMaterial]);
+
+
+  const handleCall = (phone: string) => {
+    if (!phone) return;
+    Linking.openURL(`tel:${phone.replace(/-/g, "")}`);
+  };
+
+  const handleSms = (phone: string) => {
+    if (!phone) return;
+    Linking.openURL(`sms:${phone.replace(/-/g, "")}`);
+  };
+
+  const getBadgeColor = (posName: string) => {
+    if (posName.includes("CEO")) return "#111827";
+    if (posName.includes("실장")) return "#10B981";
+    if (posName.includes("조교장")) return "#EF4444";
+    if (posName.includes("개발")) return "#8B5CF6";
+    return "#3B82F6";
+  };
+
+  // 체크박스 컴포넌트
+  const CheckBox = ({ label, value, onChange }: { label: string, value: boolean, onChange: (v: boolean) => void }) => (
+    <TouchableOpacity style={styles.checkboxContainer} onPress={() => onChange(!value)} activeOpacity={0.7}>
+      <Ionicons 
+        name={value ? "checkbox" : "square-outline"} 
+        size={20} 
+        color={value ? "#4F46E5" : "#9CA3AF"} 
+      />
+      <Text style={[styles.checkboxLabel, value && styles.checkboxLabelActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+
+  const StaffCard = ({ item }: { item: Assistant }) => (
+    <View style={[styles.card, item.isInactive && styles.cardInactive]}>
+      <View style={styles.cardHeader}>
+        <View style={styles.headerTop}>
+            <View style={styles.headerLeft}>
+                <Text style={[styles.name, item.isInactive && styles.textInactive]}>{item.name}</Text>
+                {/* 직책 뱃지 */}
+                <View style={styles.badgeContainer}>
+                  {item.positions.map((pos, idx) => (
+                      <View key={idx} style={[styles.badge, { backgroundColor: getBadgeColor(pos) }, item.isInactive && styles.badgeInactive]}>
+                      <Text style={styles.badgeText}>{pos}</Text>
+                      </View>
+                  ))}
+                </View>
+            </View>
+            <Text style={[styles.startDate, item.isInactive && styles.textInactive]}>{item.startDate}</Text>
+        </View>
+        
+        {/* 역할 뱃지 표시 (비근무여도 표시) */}
+        {item.roles.length > 0 && (
+          <View style={styles.roleContainer}>
+            {item.roles.map((role, idx) => (
+              <View key={idx} style={styles.roleBadge}>
+                <Text style={styles.roleText}>{role}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+      
+      <View style={styles.divider} />
+
+      <View style={styles.row}>
+        <TouchableOpacity 
+          style={styles.contactItem} 
+          onPress={() => !item.isInactive && handleCall(item.phone)}
+          disabled={item.isInactive}
+        >
+            <Ionicons name="call" size={16} color={item.isInactive ? "#9CA3AF" : "#6B7280"} />
+            <Text style={[styles.contactText, item.isInactive && styles.textInactive]}>
+              {item.phone || "-"}
+            </Text>
+        </TouchableOpacity>
+        
+        {!item.isInactive && item.phone && (
+          <TouchableOpacity style={styles.iconBtn} onPress={() => handleSms(item.phone)}>
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color="#4B5563" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {item.email ? (
+        <View style={styles.row}>
+            <View style={styles.contactItem}>
+                <Ionicons name="mail" size={16} color={item.isInactive ? "#9CA3AF" : "#6B7280"} />
+                <Text style={[styles.contactText, item.isInactive && styles.textInactive]}>
+                  {item.email}
+                </Text>
+            </View>
+        </View>
+      ) : null}
     </View>
+  );
+
+  if (loading && !refreshing) {
+    return <View style={styles.center}><ActivityIndicator size="large" color="#4F46E5" /></View>;
+  }
+
+  return (
+    <ScrollView 
+      style={styles.container} 
+      contentContainerStyle={styles.contentContainer}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <View style={styles.pageHeader}>
+        <Text style={styles.headerTitle}>주소록</Text>
+        <Text style={styles.headerDesc}>팀원 연락처 및 역할 정보입니다.</Text>
+      </View>
+
+      {/* 1. CEO 섹션 */}
+      {ceos.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>CEO</Text>
+          {ceos.map((item, i) => <StaffCard key={i} item={item} />)}
+        </View>
+      )}
+
+      {/* 2. 실장 섹션 */}
+      {managers.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>실장</Text>
+          {managers.map((item, i) => <StaffCard key={i} item={item} />)}
+        </View>
+      )}
+
+      {/* 3. 조교 섹션 */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>조교 ({assistants.length}명)</Text>
+
+        {/* 필터 컨트롤 영역 (조교 리스트 상단) */}
+        <View style={styles.filterBox}>
+            <View style={styles.filterRow}>
+                <Text style={styles.filterLabel}>상태</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <CheckBox label="현역" value={showActive} onChange={setShowActive} />
+                    <CheckBox label="비근무" value={showInactive} onChange={setShowInactive} />
+                </View>
+            </View>
+            <View style={styles.filterDivider} />
+            <View style={styles.filterRow}>
+                <Text style={styles.filterLabel}>역할</Text>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <CheckBox label="현장" value={showField} onChange={setShowField} />
+                    <CheckBox label="자료" value={showMaterial} onChange={setShowMaterial} />
+                </View>
+            </View>
+        </View>
+
+        {assistants.length === 0 ? (
+          <Text style={styles.emptyText}>조건에 맞는 조교가 없습니다.</Text>
+        ) : (
+          assistants.map((item, i) => <StaffCard key={i} item={item} />)
+        )}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#F8FAFC",
-    padding: 24,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#334155",
-    marginBottom: 12,
-  },
-  desc: {
-    fontSize: 16,
-    color: "#64748B",
-    textAlign: "center",
-    lineHeight: 24,
-  },
-  highlight: {
-    fontWeight: "700",
-    color: "#4F46E5",
-  },
+  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  contentContainer: { paddingBottom: 40 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  
+  pageHeader: { padding: 20, paddingTop: 60, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#E5E7EB", marginBottom: 10 },
+  headerTitle: { fontSize: 24, fontWeight: "800", color: "#111" },
+  headerDesc: { fontSize: 14, color: "#6B7280", marginTop: 4 },
+
+  // 필터 스타일
+  filterBox: { backgroundColor: "#fff", padding: 15, borderRadius: 12,marginBottom: 16,borderWidth: 1,borderColor: "#E5E7EB"},
+  filterRow: { flexDirection: 'row', alignItems: 'center' },
+  filterLabel: { fontSize: 14, fontWeight: "700", color: "#374151", width: 50 },
+  filterDivider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 10 },
+  
+  checkboxContainer: { flexDirection: 'row', alignItems: 'center' },
+  checkboxLabel: { marginLeft: 4, fontSize: 14, color: "#6B7280" },
+  checkboxLabelActive: { color: "#1F2937", fontWeight: "600" },
+
+  section: { marginTop: 20, paddingHorizontal: 16 },
+  sectionTitle: { fontSize: 18, fontWeight: "700", color: "#374151", marginBottom: 12, marginLeft: 4 },
+
+  card: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#E5E7EB", shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
+  // 비근무자 카드 스타일 (회색 배경)
+  cardInactive: { backgroundColor: "#F3F4F6", borderColor: "#E5E7EB", shadowOpacity: 0 },
+  textInactive: { color: "#9CA3AF" },
+  badgeInactive: { backgroundColor: "#9CA3AF", opacity: 0.7 },
+
+  cardHeader: { marginBottom: 12 },
+  headerTop: { flexDirection: "row", justifyContent: 'space-between', alignItems: "flex-start", marginBottom: 6 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', flex: 1 },
+  
+  name: { fontSize: 17, fontWeight: "700", color: "#1F2937", marginRight: 8 },
+  startDate: { fontSize: 13, color: "#6B7280", fontWeight: "500" },
+  
+  badgeContainer: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  badgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  // 역할 뱃지 스타일
+  roleContainer: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  roleBadge: { backgroundColor: "#F3F4F6", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: "#E5E7EB" },
+  roleText: { fontSize: 12, color: "#4B5563", fontWeight: "600" },
+
+  divider: { height: 1, backgroundColor: "#F3F4F6", marginBottom: 12 },
+
+  row: { flexDirection: "row", alignItems: "center", marginBottom: 8, justifyContent: 'space-between' },
+  contactItem: { flexDirection: "row", alignItems: "center", gap: 8 },
+  contactText: { fontSize: 14, color: "#4B5563", fontWeight: "500" },
+  
+  iconBtn: { padding: 4 },
+  emptyText: { textAlign: "center", marginTop: 20, color: "#9CA3AF", fontSize: 14 },
 });

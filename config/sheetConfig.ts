@@ -10,6 +10,9 @@ export const CSV_URLS = {
     // 수업 위치 시트 - [웹/앱] / [data] / [Data_Storage] / [수업_장소들]
     POSITIONS : "REMOVED_PRIVATE_SHEET_URL",
 
+    // 조교 정보 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보]
+    ASSISTANT_INFO : "REMOVED_PRIVATE_SHEET_URL",
+
 };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
@@ -112,3 +115,14 @@ export const CLASS_SHEET_HEADERS = {
 export const CLASS_SHEET_HEADER_ROW = 5;
 export const CLASS_DATA_COL_SHIFT = 5; // F열부터 데이터 시작
 export const CLASS_SESSION_STRIDE = 3; // 데이터가 3열 간격으로 배치
+
+export const ASSISTANT_HEADERS = {
+  POSITION: "직책",      
+  NAME: "성명",          
+  PHONE: "전화번호",      
+  EMAIL: "gmail",       
+  ROLE: "역할",          
+  START_DATE: "근무 시작",
+  ACCOUNT: "계좌번호",    
+  STATUS: "비고",       
+};

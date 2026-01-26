@@ -162,6 +162,21 @@ export default function HomeScreen() {
     }
   };
 
+  const handleRequestAdmin = () => {
+    if (Platform.OS !== 'android') return Alert.alert("알림", "기기 등록은 안드로이드 앱에서만 가능합니다.");
+    Alert.alert("관리자 신청", `현재 기기 ID(${androidId})를 관리자로 등록 신청하시겠습니까?`, [
+       { text: "취소", style: "cancel" },
+       { text: "신청", onPress: () => Alert.alert("준비 중", "곧 기능이 구현됩니다.") }
+    ]);
+  };
+
+  const handleRequestManager = () => {
+    Alert.alert("중간 관리자 신청", `현재 계정(${user?.email})으로 중간 관리자 권한을 신청하시겠습니까?`, [
+       { text: "취소", style: "cancel" },
+       { text: "신청", onPress: () => Alert.alert("준비 중", "곧 기능이 구현됩니다.") }
+    ]);
+  };
+
   if (loading && !refreshing) {
     return <View style={styles.center}><ActivityIndicator /></View>;
   }
@@ -189,6 +204,18 @@ export default function HomeScreen() {
           <View style={styles.row}>
             <InfoItem label="이름" value={user.displayName || "이름 없음"} />
             <InfoItem label="이메일" value={user.email} />
+          </View>
+
+          <View style={styles.authButtonContainer}>
+             {Platform.OS === 'android' && (
+               <TouchableOpacity style={styles.reqBtnAdmin} onPress={handleRequestAdmin}>
+                 <Text style={styles.reqBtnText}>관리자(Admin) 기기 등록</Text>
+               </TouchableOpacity>
+             )}
+             
+             <TouchableOpacity style={styles.reqBtnManager} onPress={handleRequestManager}>
+               <Text style={styles.reqBtnText}>매니저(Manager) 신청</Text>
+             </TouchableOpacity>
           </View>
 
           <View style={styles.section}>
@@ -268,6 +295,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   label: { fontSize: 13, color: '#888', marginBottom: 4 },
   value: { fontSize: 16, fontWeight: '600', color: '#333' },
+
+  authButtonContainer: { flexDirection: 'row', gap: 10, marginTop: 20, marginBottom: 5 },
+  reqBtnAdmin: { flex: 1, backgroundColor: '#4B5563', paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  reqBtnManager: { flex: 1, backgroundColor: '#4F46E5', paddingVertical: 10, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  reqBtnText: { color: 'white', fontSize: 13, fontWeight: '700' },
 
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#555', marginBottom: 8 },
