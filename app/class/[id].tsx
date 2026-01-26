@@ -78,6 +78,33 @@ export default function ClassDetailScreen() {
   const [individualMsg, setIndividualMsg] = useState("");
   const [sessionNum, setSessionNum] = useState("");
 
+  const [template, setTemplate] = useState(INDIVIDUAL_MESSAGE_TEMPLATE);
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      // 웹에서는 브라우저 기본 알림창 사용
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      // 앱에서는 기존 Alert 사용
+      Alert.alert(title, message);
+    }
+  };
+
+  const showTemplateGuide = () => {
+    showAlert(
+      "템플릿 변수 가이드",
+      "아래 변수들을 사용하면 학생별 정보로 자동 변환됩니다.\n\n" +
+      "${STUDENT_NAME} : 학생 이름\n" +
+      "${QUARTER} : 분기\n" +
+      "${SESSION} : 차시\n" +
+      "${ATTENDANCE} : 출석 결과\n" +
+      "${HOMEWORK} : 과제 점수\n" +
+      "${TEST} : 시험 점수\n" +
+      "${CLASS_NAME} : 수업명\n" +
+      "${DAY} : 요일"
+    );
+  };
+
   const [isAdminDevice, setIsAdminDevice] = useState(false);
 
   // 시트 데이터를 기반으로 Admin 권한 확인
@@ -380,7 +407,7 @@ export default function ClassDetailScreen() {
         const homework = studentRow[startIndex + 1] || "-";
         const test = studentRow[startIndex + 2] || "-";
 
-        let content = INDIVIDUAL_MESSAGE_TEMPLATE
+        let content = template 
           .replace("${STUDENT_NAME}", studentName)
           .replace("${QUARTER}", String(row[CLASSES_HEADERS.QUARTER] ?? "")) 
           .replace("${SESSION}", String(session))
@@ -413,7 +440,7 @@ export default function ClassDetailScreen() {
 
     } catch (error) {
       console.error(error);
-      Alert.alert("오류", "전송 중 문제가 발생했습니다.");
+      showAlert("오류", "전송 중 문제가 발생했습니다.");
     } finally {
       setSendingIndividual(false); 
     }
@@ -547,7 +574,7 @@ export default function ClassDetailScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>공지 발송</Text>
+          <Text style={styles.cardTitle}>공지 메시지 추가</Text>
           <Text style={styles.desc}>이 수업의 모든 학생에게 공지를 등록합니다.</Text>
           <TextInput 
             style={styles.input} 
@@ -562,7 +589,7 @@ export default function ClassDetailScreen() {
             <ActivityIndicator style={{marginTop: 10}} />
           ) : (
             <Pressable style={({ pressed }) => [styles.btnRed, pressed && { opacity: 0.8 }]} onPress={handleSendNotice}>
-              <Text style={styles.btnText}>공지 보내기</Text>
+              <Text style={styles.btnText}>공지 메시지 추가</Text>
             </Pressable>
           )}
 
@@ -574,10 +601,11 @@ export default function ClassDetailScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>개별 메시지 발송</Text>
+          <Text style={styles.cardTitle}>개별 메시지 추가</Text>
           <Text style={styles.desc}>차시에 맞는 출석/숙제/시험 점수를 불러와 발송합니다.</Text>
           
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+          {/* 1. 차시 입력 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
             <TextInput 
               style={[styles.input, { flex: 1, minHeight: 40, marginBottom: 0, marginRight: 10 }]} 
               placeholder="차시 (예: 1)" 
@@ -588,11 +616,30 @@ export default function ClassDetailScreen() {
             <Text style={{ fontWeight: '600', color: '#4B5563' }}>차시</Text>
           </View>
 
+          {/* 2. 템플릿 입력 */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+             <Text style={{ fontWeight: '600', color: '#4B5563' }}>메시지 템플릿</Text>
+             {/* 도움말 버튼 */}
+             <Pressable onPress={showTemplateGuide} style={{ padding: 4, flexDirection: 'row', alignItems: 'center' }}>
+               <Text style={{ fontSize: 16 }}>❓</Text>
+               <Text style={{ fontSize: 12, color: '#4F46E5', fontWeight: 'bold', marginLeft: 2 }}>작성법</Text>
+             </Pressable>
+          </View>
+          
+          <TextInput 
+            style={[styles.input, { minHeight: 120, fontSize: 13 }]} 
+            placeholder="메시지 내용을 입력하세요" 
+            multiline 
+            textAlignVertical="top"
+            value={template} // 여기에 기본값이 들어감
+            onChangeText={setTemplate} 
+          />
+
           {sendingIndividual ? (
              <ActivityIndicator style={{marginTop: 10}} color="#10B981" />
           ) : (
             <Pressable style={({ pressed }) => [styles.btnGreen, pressed && { opacity: 0.8 }]} onPress={handleSendIndividual}>
-              <Text style={styles.btnText}>문자 메시지 보내기</Text>
+              <Text style={styles.btnText}>문자 메시지 추가</Text>
             </Pressable>
           )}
 
@@ -605,8 +652,8 @@ export default function ClassDetailScreen() {
 
         { isAdminDevice && (
           <View style={styles.card}>
-              <Text style={styles.cardTitle}>일반 문자 발송</Text>
-              <Text style={styles.desc}>전화번호를 입력하여 직접 문자를 보냅니다.</Text>
+              <Text style={styles.cardTitle}>문자 발송</Text>
+              <Text style={styles.desc}>해당 수업의 구글 시트에 등록된 문자(unsent)를 보냅니다.</Text>
               <Pressable style={({ pressed }) => [styles.btnBlue, pressed && { opacity: 0.8 }]} onPress={handleDirectSms}>
                 <Text style={styles.btnText}>[문자 발송]</Text>
               </Pressable>

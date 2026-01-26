@@ -9,10 +9,12 @@
 // \${HOMEWORK} => 숙제 결과
 // \${TEST} => 시험 결과
 export const INDIVIDUAL_MESSAGE_TEMPLATE = 
-`\${STUDENT_NAME} 학생 \${SESSION}차시 테스트 문자
+`오늘 \${CLASS_NAME} \${SESSION}차시 수업을 진행하였습니다.
+\${STUDENT_NAME} 학생 \${SESSION}차시 테스트 문자
 
-- 출석: \${ATTENDANCE}
-- 숙제: \${HOMEWORK}
-- 시험: \${TEST}
+◇ 오늘 진도 : 
+◇ 다음 진도 : 
+◇ \${SESSION}차시 과제 완성도: \${HOMEWORK}
+◇ \${SESSION}차시 테스트: \${TEST}점/점(평균: 점, 최고점: 점)
 
-특이사항이 있다면 연락 바랍니다.`;
+언제나 최선을 다하여 학생을 지도하겠습니다. 믿고 맡겨주셔서 감사합니다.`;
