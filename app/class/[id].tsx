@@ -14,15 +14,13 @@ import DirectSms from "../../utils/smsSender";
 import { getClassUrls } from "../../utils/classInfo";
 
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS, 
-  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE } from "../../config/sheetConfig";
+  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES } from "../../config/sheetConfig";
 import { ADMIN_DEVICE_IDS } from "../../config/adminConfig";
 import { INDIVIDUAL_MESSAGE_TEMPLATE } from "../../config/messageConfig";
 
 // Constants
 const WARN_RADIUS_METERS = 30; // 30m 이내 정상
 const ACCEPT_RADIUS_METERS = 100; // 100m 이내 인정(경고)
-const SHEET_NAME_ATTENDANCE = "조교_출석_현황"; 
-const SHEET_NAME_MESSAGE = "메시지 log";
 
 // Helpers
 const hmToMinutes = (hm: string) => {
@@ -202,7 +200,7 @@ export default function ClassDetailScreen() {
     };
 
     setSaving(true);
-    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAME_ATTENDANCE, payload);
+    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
     setSaving(false);
 
     if (res.ok) {
@@ -245,7 +243,7 @@ export default function ClassDetailScreen() {
     setCheckedIn(false); setCheckInTime(null); setMessage("✅ 퇴근 처리 중…");
     await clearSession();
 
-    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAME_ATTENDANCE, payload);
+    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
     setSaving(false);
 
     if (res.ok) {
@@ -298,7 +296,7 @@ export default function ClassDetailScreen() {
           [MESSAGE_LOG_HEADERS.MESSAGE_STATUS]: "unsent", 
           [MESSAGE_LOG_HEADERS.CONTENT]: noticeText
         };
-        return postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAME_MESSAGE, payload);
+        return postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, payload);
       });
 
       await Promise.all(promises);
@@ -379,7 +377,7 @@ export default function ClassDetailScreen() {
           [MESSAGE_LOG_HEADERS.CONTENT]: content
         };
 
-        return postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAME_MESSAGE, payload);
+        return postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, payload);
       });
 
       await Promise.all(promises);
@@ -427,7 +425,7 @@ export default function ClassDetailScreen() {
             setSaving(true);
             try {
               // 2. 메시지 로그 시트 데이터 가져오기
-              const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAME_MESSAGE}`);
+              const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAMES.MESSAGE_LOG}`);
               const data = await response.json();
               
               if (data.error) {
@@ -470,12 +468,12 @@ export default function ClassDetailScreen() {
 
               // 5. 시트 상태 업데이트 요청 (이 수업 ID만 sent로 변경)
               const updatePayload = {
-                sheetName: SHEET_NAME_MESSAGE,
+                sheetName: SHEET_NAMES.MESSAGE_LOG,
                 action: "update_status",
                 classId: targetId, 
               };
               
-              const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAME_MESSAGE, updatePayload);
+              const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, updatePayload);
 
               if (updateRes.ok) {
                  Alert.alert("완료", `${sentCount}건의 문자를 발송했습니다.`);

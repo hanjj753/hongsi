@@ -13,7 +13,8 @@ import { webAuth } from '../../firebaseConfig';
 // Utils & Config
 import { getCurrentUserEmail } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, ATTENDANCE_LOG_HEADERS } from "../../config/sheetConfig";
+import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS } from "../../config/sheetConfig";
+import { postSheetData } from "../../utils/sheetApi";
 
 // ==========================================
 // Types & Helpers
@@ -176,6 +177,43 @@ export default function HomeScreen() {
        { text: "신청", onPress: () => Alert.alert("준비 중", "곧 기능이 구현됩니다.") }
     ]);
   };
+
+  const registerUserToSheet = async (userData: any, dId: string | null) => {
+    if (!userData || !userData.email) return;
+
+    try {
+      await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.PERMISSIONS, {
+        action: "register_user",
+        name: userData.displayName || "이름 없음",
+        email: userData.email,
+        deviceId: dId || "", 
+      });
+      // console.log("유저 등록 요청 보냄");
+    } catch (e) {
+      console.error("유저 등록 실패", e);
+    }
+  };
+
+  // 1. 로그인 유저 확인 & 기기 ID 확인 (수정됨)
+  useEffect(() => {
+    const u = Platform.OS === 'web' ? webAuth.currentUser : auth().currentUser;
+    setUser(u);
+
+    let currentAndroidId: string | null = null;
+
+    if (Platform.OS === 'android') {
+      try {
+        currentAndroidId = Application.getAndroidId();
+        setAndroidId(currentAndroidId);
+      } catch (e) {
+        console.error("Android ID Error", e);
+      }
+    }
+
+    if (u) {
+      registerUserToSheet(u, currentAndroidId);
+    }
+  }, []);
 
   if (loading && !refreshing) {
     return <View style={styles.center}><ActivityIndicator /></View>;

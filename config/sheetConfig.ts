@@ -23,6 +23,15 @@ export const API_URLS = {
 
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
     MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
+
+    ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
+
+};
+
+export const SHEET_NAMES = {
+    PERMISSIONS: "앱 권한 관리", 
+    ATTENDANCE: "조교_출석_현황", 
+    MESSAGE_LOG: "메시지 log",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
@@ -116,6 +125,7 @@ export const CLASS_SHEET_HEADER_ROW = 5;
 export const CLASS_DATA_COL_SHIFT = 5; // F열부터 데이터 시작
 export const CLASS_SESSION_STRIDE = 3; // 데이터가 3열 간격으로 배치
 
+// 조교 정보 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보]
 export const ASSISTANT_HEADERS = {
   POSITION: "직책",      
   NAME: "성명",          
@@ -125,4 +135,13 @@ export const ASSISTANT_HEADERS = {
   START_DATE: "근무 시작",
   ACCOUNT: "계좌번호",    
   STATUS: "비고",       
+};
+
+// 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
+export const PERMISSION_HEADERS = {
+  NAME: "이름",
+  EMAIL: "이메일",
+  ROLE: "권한",
+  DEVICE_ID: "Device ID",
+  STATUS: "상태",
 };
