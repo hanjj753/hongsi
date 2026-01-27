@@ -13,7 +13,7 @@ import { webAuth } from '../../firebaseConfig';
 // Utils & Config
 import { getCurrentUserEmail } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEADERS } from "../../config/sheetConfig";
+import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
 import { postSheetData } from "../../utils/sheetApi";
 
 // ==========================================
@@ -109,10 +109,33 @@ export default function HomeScreen() {
 
   const registerUserToSheet = async (userData: any, dId: string | null) => {
     if (!userData || !userData.email) return;
+    
+    // 기본값은 구글 프로필 이름
+    let finalName = userData.displayName || "이름 없음";
+
+    try {
+      // 1. [조교 정보] 시트에서 이메일로 실명 찾기
+      const assistantData = await fetchSheetData(CSV_URLS.ASSISTANT_INFO);
+      
+      if (Array.isArray(assistantData)) {
+        const myRecord = assistantData.find((r: any) => 
+          String(r[ASSISTANT_HEADERS.EMAIL] || "").trim().toLowerCase() === userData.email.trim().toLowerCase()
+        );
+        
+        // 매칭되는 조교 정보가 있고, 성명이 있다면 그 이름 사용!
+        if (myRecord && myRecord[ASSISTANT_HEADERS.NAME]) {
+          finalName = myRecord[ASSISTANT_HEADERS.NAME];
+        }
+      }
+    } catch (e) {
+      console.error("조교 이름 매칭 실패 (구글 이름 사용)", e);
+    }
+
+    // 2. 서버에 등록 요청 (찾아낸 이름으로)
     try {
       await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.PERMISSIONS, {
         action: "register_user",
-        name: userData.displayName || "이름 없음",
+        name: finalName, 
         email: userData.email,
         deviceId: dId || "", 
       });

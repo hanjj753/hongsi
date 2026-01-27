@@ -10,7 +10,7 @@
 // \${TEST} => 시험 결과
 export const INDIVIDUAL_MESSAGE_TEMPLATE = 
 `오늘 \${CLASS_NAME} \${SESSION}차시 수업을 진행하였습니다.
-\${STUDENT_NAME} 학생 \${SESSION}차시 테스트 문자
+\${STUDENT_NAME} 학생 과제 및 테스트 결과 보내드립니다.
 
 ◇ 오늘 진도 : 
 ◇ 다음 진도 : 

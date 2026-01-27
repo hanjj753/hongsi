@@ -408,14 +408,14 @@ export default function ClassDetailScreen() {
         const test = studentRow[startIndex + 2] || "-";
 
         let content = template 
-          .replace("${STUDENT_NAME}", studentName)
-          .replace("${QUARTER}", String(row[CLASSES_HEADERS.QUARTER] ?? "")) 
-          .replace("${SESSION}", String(session))
-          .replace("${ATTENDANCE}", attendance)
-          .replace("${HOMEWORK}", homework)
-          .replace("${TEST}", test)
-          .replace("${CLASS_NAME}", classTitle) 
-          .replace("${DAY}", String(row[CLASSES_HEADERS.DAY] ?? ""));
+          .split("${STUDENT_NAME}").join(studentName)
+          .split("${QUARTER}").join(String(row[CLASSES_HEADERS.QUARTER] ?? "")) 
+          .split("${SESSION}").join(String(session))
+          .split("${ATTENDANCE}").join(attendance)
+          .split("${HOMEWORK}").join(homework)
+          .split("${TEST}").join(test)
+          .split("${CLASS_NAME}").join(classTitle) 
+          .split("${DAY}").join(String(row[CLASSES_HEADERS.DAY] ?? ""));
 
         const payload = {
           [MESSAGE_LOG_HEADERS.CLASS_ID]: targetId,
@@ -447,20 +447,26 @@ export default function ClassDetailScreen() {
   };
 
   const handleDirectSms = async () => {
+    // 1. 안드로이드 필수 권한 요청 (SEND_SMS + READ_PHONE_STATE)
     if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.SEND_SMS,
-        {
-          title: "문자 보내기 권한",
-          message: "앱에서 학생들에게 문자를 보내려면 권한이 필요합니다.",
-          buttonNeutral: "나중에",
-          buttonNegative: "취소",
-          buttonPositive: "허용"
-        }
-      );
+      try {
+        // 여러 권한을 한 번에 요청합니다.
+        const granted = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.SEND_SMS,
+          PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
+        ]);
 
-      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-        Alert.alert("권한 거부", "권한이 없어서 문자를 보낼 수 없습니다.\n[설정]에서 권한을 허용해주세요.");
+        const smsGranted = granted[PermissionsAndroid.PERMISSIONS.SEND_SMS] === PermissionsAndroid.RESULTS.GRANTED;
+        const stateGranted = granted[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE] === PermissionsAndroid.RESULTS.GRANTED;
+
+        // READ_PHONE_STATE는 기기/버전에 따라 필수가 아닐 수도 있으므로, SEND_SMS만이라도 있으면 진행 시도
+        if (!smsGranted) {
+          showAlert("권한 거부", "문자 발송 권한이 거부되었습니다.\n[설정] > [앱] 에서 권한을 허용해주세요.");
+          return;
+        }
+      } catch (err) {
+        console.warn(err);
+        showAlert("권한 오류", "권한을 요청하는 중 오류가 발생했습니다.");
         return;
       }
     }
@@ -475,14 +481,16 @@ export default function ClassDetailScreen() {
           onPress: async () => {
             setSaving(true);
             try {
+              // 1. 시트 데이터 가져오기
               const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAMES.MESSAGE_LOG}`);
               const data = await response.json();
               
               if (data.error) {
-                Alert.alert("오류", "시트 데이터를 가져오지 못했습니다.");
+                showAlert("오류", "시트 데이터를 가져오지 못했습니다.");
                 return;
               }
 
+              // 2. 필터링 (현재 수업 & unsent)
               const unsentMessages = data.filter((row: any) => {
                 const isUnsent = row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent";
                 const isSameClass = String(row[MESSAGE_LOG_HEADERS.CLASS_ID]) === String(targetId);
@@ -490,12 +498,16 @@ export default function ClassDetailScreen() {
               });
 
               if (unsentMessages.length === 0) {
-                Alert.alert("알림", "이 수업에 발송 대기 중인(unsent) 메시지가 없습니다.");
+                showAlert("알림", "이 수업에 발송 대기 중인(unsent) 메시지가 없습니다.");
                 setSaving(false);
                 return;
               }
 
               let sentCount = 0;
+              let failCount = 0;
+              let lastError = "";
+
+              // 3. 문자 발송 루프
               for (const msg of unsentMessages) {
                 const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE];
                 const content = msg[MESSAGE_LOG_HEADERS.CONTENT];
@@ -503,32 +515,44 @@ export default function ClassDetailScreen() {
                 if (phone && content) {
                   const cleanPhone = String(phone).replace(/-/g, "");
                   try {
+                    // DirectSms 모듈 사용
                     await DirectSms.sendDirectSms(cleanPhone, content);
                     sentCount++;
-                  } catch (e) {
+                  } catch (e: any) {
                     console.error("SMS 전송 실패:", phone, e);
+                    failCount++;
+                    lastError = e.message || String(e);
                   }
                 }
-                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // 안드로이드 스팸 차단 방지 딜레이 (1.5초)
+                await new Promise(resolve => setTimeout(resolve, 1500));
               }
 
-              const updatePayload = {
-                sheetName: SHEET_NAMES.MESSAGE_LOG,
-                action: "update_status",
-                classId: targetId, 
-              };
-              
-              const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, updatePayload);
+              // 4. 상태 업데이트
+              if (sentCount > 0) {
+                const updatePayload = {
+                  sheetName: SHEET_NAMES.MESSAGE_LOG,
+                  action: "update_status",
+                  classId: targetId, 
+                };
+                
+                const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, updatePayload);
 
-              if (updateRes.ok) {
-                 Alert.alert("완료", `${sentCount}건의 문자를 발송했습니다.`);
+                if (updateRes.ok) {
+                   let resultMsg = `${sentCount}건 발송 성공.`;
+                   if (failCount > 0) resultMsg += `\n(${failCount}건 실패)`;
+                   showAlert("완료", resultMsg);
+                } else {
+                   showAlert("주의", "문자는 보냈으나, 시트 상태 변경(sent)에 실패했습니다.");
+                }
               } else {
-                 Alert.alert("주의", "문자는 발송했으나, 시트 상태 업데이트에 실패했습니다.");
+                showAlert("발송 실패", `모든 전송이 실패했습니다.\n(권한 문제일 가능성이 높습니다)\n오류 내용: ${lastError}`);
               }
 
-            } catch (error) {
+            } catch (error: any) {
               console.error(error);
-              Alert.alert("오류 상세", error.message || "알 수 없는 오류");
+              showAlert("오류 상세", error.message || "알 수 없는 오류");
             } finally {
               setSaving(false);
             }
