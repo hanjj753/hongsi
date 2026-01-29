@@ -24,8 +24,13 @@ export default function AssistantScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [showActive, setShowActive] = useState(true);     // 현역
-  const [showInactive, setShowInactive] = useState(false); // 비근무
+  // ❌ 삭제
+  // const [showActive, setShowActive] = useState(true);
+  // const [showInactive, setShowInactive] = useState(false);
+
+  // ✅ 추가: 접기/펼치기
+  const [activeCollapsed, setActiveCollapsed] = useState(false);
+  const [inactiveCollapsed, setInactiveCollapsed] = useState(true); // 비근무는 기본 접힘(원하면 false로)
   const [showField, setShowField] = useState(true);       // 현장
   const [showMaterial, setShowMaterial] = useState(true); // 자료
 
@@ -71,46 +76,45 @@ export default function AssistantScreen() {
     setRefreshing(false);
   };
 
-  const { ceos, managers, assistants } = useMemo(() => {
+  const { ceos, managers, activeAssistants, inactiveAssistants } = useMemo(() => {
     const groupCeo: Assistant[] = [];
     const groupManager: Assistant[] = [];
-    const groupAssistant: Assistant[] = [];
+    const groupActive: Assistant[] = [];
+    const groupInactive: Assistant[] = [];
 
     allData.forEach(staff => {
-      // 1. CEO/실장/조교 그룹 분류
+      // 1) CEO/실장/조교 그룹 분류
       if (staff.rawPosition.includes("CEO")) {
         groupCeo.push(staff);
-      } else if (staff.rawPosition.includes("실장")) {
-        groupManager.push(staff);
-      } else {
-        // 2. 조교 그룹에 대해서만 필터 적용
-        
-        // (1) 상태 필터 (현역/비근무)
-        const isActive = !staff.isInactive;
-        if (isActive && !showActive) return;      
-        if (!isActive && !showInactive) return;
-
-        // (2) 역할 필터 (현장/자료)
-        // 현장 체크됨 AND 이 사람에게 현장 역할이 있음 -> 통과
-        // 자료 체크됨 AND 이 사람에게 자료 역할이 있음 -> 통과
-        // 둘 다 해당 없으면 -> 탈락
-        const hasField = staff.roles.includes("현장");
-        const hasMaterial = staff.roles.includes("자료");
-        
-        // 역할 데이터가 아예 없는 경우(기타)는 어떻게 할지? 일단 표시.
-        // 역할 데이터가 있는데 체크박스 조건에 안 맞으면 제외.
-        if (staff.roles.length > 0) {
-            const matchField = showField && hasField;
-            const matchMaterial = showMaterial && hasMaterial;
-            if (!matchField && !matchMaterial) return;
-        }
-
-        groupAssistant.push(staff);
+        return;
       }
+      if (staff.rawPosition.includes("실장")) {
+        groupManager.push(staff);
+        return;
+      }
+
+      // 2) 조교: 역할 필터(현장/자료)만 적용
+      const hasField = staff.roles.includes("현장");
+      const hasMaterial = staff.roles.includes("자료");
+
+      if (staff.roles.length > 0) {
+        const matchField = showField && hasField;
+        const matchMaterial = showMaterial && hasMaterial;
+        if (!matchField && !matchMaterial) return;
+      }
+
+      // 3) 상태에 따라 두 그룹으로 분리
+      if (staff.isInactive) groupInactive.push(staff);
+      else groupActive.push(staff);
     });
 
-    return { ceos: groupCeo, managers: groupManager, assistants: groupAssistant };
-  }, [allData, showActive, showInactive, showField, showMaterial]);
+    return {
+      ceos: groupCeo,
+      managers: groupManager,
+      activeAssistants: groupActive,
+      inactiveAssistants: groupInactive,
+    };
+  }, [allData, showField, showMaterial]);
 
 
   const handleCall = (phone: string) => {
@@ -239,34 +243,74 @@ export default function AssistantScreen() {
       )}
 
       {/* 3. 조교 섹션 */}
+      {/* 3. 조교 섹션 */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>조교 ({assistants.length}명)</Text>
+        <Text style={styles.sectionTitle}>
+          조교 ({activeAssistants.length + inactiveAssistants.length}명)
+        </Text>
 
-        {/* 필터 컨트롤 영역 (조교 리스트 상단) */}
+        {/* 필터 컨트롤 영역 (역할만 유지) */}
         <View style={styles.filterBox}>
-            <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>상태</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <CheckBox label="현역" value={showActive} onChange={setShowActive} />
-                    <CheckBox label="비근무" value={showInactive} onChange={setShowInactive} />
-                </View>
+          <View style={styles.filterRow}>
+            <Text style={styles.filterLabel}>역할</Text>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <CheckBox label="현장" value={showField} onChange={setShowField} />
+              <CheckBox label="자료" value={showMaterial} onChange={setShowMaterial} />
             </View>
-            <View style={styles.filterDivider} />
-            <View style={styles.filterRow}>
-                <Text style={styles.filterLabel}>역할</Text>
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <CheckBox label="현장" value={showField} onChange={setShowField} />
-                    <CheckBox label="자료" value={showMaterial} onChange={setShowMaterial} />
-                </View>
-            </View>
+          </View>
         </View>
 
-        {assistants.length === 0 ? (
-          <Text style={styles.emptyText}>조건에 맞는 조교가 없습니다.</Text>
-        ) : (
-          assistants.map((item, i) => <StaffCard key={i} item={item} />)
+        {/* ✅ 현역 조교 섹션 (접기/펼치기) */}
+        <TouchableOpacity
+          style={styles.collapseHeader}
+          onPress={() => setActiveCollapsed(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.collapseHeaderLeft}>
+            <Ionicons
+              name={activeCollapsed ? "chevron-forward" : "chevron-down"}
+              size={18}
+              color="#374151"
+            />
+            <Text style={styles.collapseTitle}>현역 조교</Text>
+            <Text style={styles.collapseCount}>({activeAssistants.length}명)</Text>
+          </View>
+        </TouchableOpacity>
+
+        {!activeCollapsed && (
+          activeAssistants.length === 0 ? (
+            <Text style={styles.emptyText}>조건에 맞는 현역 조교가 없습니다.</Text>
+          ) : (
+            activeAssistants.map((item, i) => <StaffCard key={`active-${i}`} item={item} />)
+          )
+        )}
+
+        {/* ✅ 비근무 조교 섹션 (접기/펼치기) */}
+        <TouchableOpacity
+          style={[styles.collapseHeader, { marginTop: 10 }]}
+          onPress={() => setInactiveCollapsed(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.collapseHeaderLeft}>
+            <Ionicons
+              name={inactiveCollapsed ? "chevron-forward" : "chevron-down"}
+              size={18}
+              color="#374151"
+            />
+            <Text style={styles.collapseTitle}>비근무 조교</Text>
+            <Text style={styles.collapseCount}>({inactiveAssistants.length}명)</Text>
+          </View>
+        </TouchableOpacity>
+
+        {!inactiveCollapsed && (
+          inactiveAssistants.length === 0 ? (
+            <Text style={styles.emptyText}>조건에 맞는 비근무 조교가 없습니다.</Text>
+          ) : (
+            inactiveAssistants.map((item, i) => <StaffCard key={`inactive-${i}`} item={item} />)
+          )
         )}
       </View>
+
     </ScrollView>
   );
 }
@@ -323,4 +367,32 @@ const styles = StyleSheet.create({
   
   iconBtn: { padding: 4 },
   emptyText: { textAlign: "center", marginTop: 20, color: "#9CA3AF", fontSize: 14 },
+
+  // 접이식 화면 구성
+  collapseHeader: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 10,
+  },
+  collapseHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  collapseTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#374151",
+  },
+  collapseCount: {
+    fontSize: 13,
+    color: "#6B7280",
+    fontWeight: "600",
+    marginLeft: 2,
+  },
+
 });
