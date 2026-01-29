@@ -24,11 +24,6 @@ export default function AssistantScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ❌ 삭제
-  // const [showActive, setShowActive] = useState(true);
-  // const [showInactive, setShowInactive] = useState(false);
-
-  // ✅ 추가: 접기/펼치기
   const [activeCollapsed, setActiveCollapsed] = useState(false);
   const [inactiveCollapsed, setInactiveCollapsed] = useState(true); // 비근무는 기본 접힘(원하면 false로)
   const [showField, setShowField] = useState(true);       // 현장
@@ -169,8 +164,21 @@ export default function AssistantScreen() {
         {item.roles.length > 0 && (
           <View style={styles.roleContainer}>
             {item.roles.map((role, idx) => (
-              <View key={idx} style={styles.roleBadge}>
-                <Text style={styles.roleText}>{role}</Text>
+              <View
+                key={idx}
+                style={[
+                  styles.roleBadge,
+                  item.isInactive && styles.roleBadgeInactive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.roleText,
+                    item.isInactive && styles.roleTextInactive,
+                  ]}
+                >
+                  {role}
+                </Text>
               </View>
             ))}
           </View>
@@ -211,6 +219,90 @@ export default function AssistantScreen() {
     </View>
   );
 
+  // 중요 인물 꾸미기
+  const ExecCard = ({ item }: { item: Assistant }) => {
+    const isCEO = item.rawPosition.includes("CEO");
+    const title = isCEO ? "CEO" : "실장";
+    const accent = isCEO ? "#111827" : "#10B981";
+    const icon = isCEO ? "sparkles-outline" : "briefcase-outline";
+
+    return (
+      <View style={styles.execCard}>
+        {/* 상단 리본 */}
+        <View style={[styles.execRibbon, { backgroundColor: accent }]}>
+          <Ionicons name={icon as any} size={14} color="#fff" />
+          <Text style={styles.execRibbonText}>{title}</Text>
+        </View>
+
+        {/* 본문 */}
+        <View style={styles.execBody}>
+          <View style={styles.execTopRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.execName}>{item.name}</Text>
+
+              {/* 직책 배지(기존 뱃지 재사용) */}
+              <View style={styles.execBadgeRow}>
+                {item.positions.map((pos, idx) => (
+                  <View key={idx} style={[styles.execBadge, { borderColor: accent }]}>
+                    <Text style={[styles.execBadgeText, { color: accent }]}>{pos}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {!!item.startDate && (
+              <View style={styles.execDatePill}>
+                <Ionicons name="calendar-outline" size={14} color="#6B7280" />
+                <Text style={styles.execDateText}>{item.startDate}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 연락처 */}
+          <View style={styles.execInfoRow}>
+            <View style={styles.execInfoItem}>
+              <Ionicons name="call-outline" size={16} color="#4B5563" />
+              <Text style={styles.execInfoText}>{item.phone || "-"}</Text>
+            </View>
+            {item.email ? (
+              <View style={styles.execInfoItem}>
+                <Ionicons name="mail-outline" size={16} color="#4B5563" />
+                <Text style={styles.execInfoText} numberOfLines={1}>
+                  {item.email}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* CTA 버튼 */}
+          <View style={styles.execCtaRow}>
+            <TouchableOpacity
+              style={[styles.execCtaBtn, { borderColor: accent }]}
+              onPress={() => handleCall(item.phone)}
+              disabled={!item.phone}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="call" size={16} color={accent} />
+              <Text style={[styles.execCtaText, { color: accent }]}>전화</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.execCtaBtn, { backgroundColor: accent, borderColor: accent }]}
+              onPress={() => handleSms(item.phone)}
+              disabled={!item.phone}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+              <Text style={[styles.execCtaText, { color: "#fff" }]}>문자</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+
+
   if (loading && !refreshing) {
     return <View style={styles.center}><ActivityIndicator size="large" color="#4F46E5" /></View>;
   }
@@ -230,7 +322,7 @@ export default function AssistantScreen() {
       {ceos.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>CEO</Text>
-          {ceos.map((item, i) => <StaffCard key={i} item={item} />)}
+            {ceos.map((item, i) => <ExecCard key={`ceo-${i}`} item={item} />)}
         </View>
       )}
 
@@ -238,7 +330,7 @@ export default function AssistantScreen() {
       {managers.length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>실장</Text>
-          {managers.map((item, i) => <StaffCard key={i} item={item} />)}
+            {managers.map((item, i) => <ExecCard key={`mgr-${i}`} item={item} />)}
         </View>
       )}
 
@@ -393,6 +485,122 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     fontWeight: "600",
     marginLeft: 2,
+  },
+
+  // 중요 인물 이쁘게 꾸미기
+  execCard: {
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  execRibbon: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  execRibbonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  execBody: {
+    padding: 16,
+  },
+  execTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  execName: {
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  execBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  execBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: "#F9FAFB",
+  },
+  execBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  execDatePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#F3F4F6",
+  },
+  execDateText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  execInfoRow: {
+    marginTop: 14,
+    gap: 8,
+  },
+  execInfoItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  execInfoText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
+    flexShrink: 1,
+  },
+  execCtaRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+  },
+  execCtaBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: "#fff",
+  },
+  execCtaText: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  // 비근무 조교 역할 태그 스타일
+  roleBadgeInactive: {
+    backgroundColor: "#E5E7EB",
+    borderColor: "#D1D5DB",
+  },
+  roleTextInactive: {
+    color: "#9CA3AF",
   },
 
 });
