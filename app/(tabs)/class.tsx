@@ -1,6 +1,6 @@
 // [수업] 탭
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
@@ -107,12 +107,32 @@ export default function ClassScreen() {
       {/* 분기 필터 */}
       <View style={styles.filterWrap}>
         <Text style={styles.filterLabel}>분기</Text>
-        <View style={styles.pickerBox}>
-          <Picker selectedValue={selectedQuarter} onValueChange={(val) => setSelectedQuarter(String(val))}>
-            {quarterOptions.map((q) => <Picker.Item key={q} label={q === "ALL" ? "전체" : q} value={q} />)}
-          </Picker>
+
+        <View style={styles.pickerShell}>
+          <View style={styles.pickerInner}>
+            <Picker
+              selectedValue={selectedQuarter}
+              onValueChange={(val) => setSelectedQuarter(String(val))}
+              style={[styles.picker, Platform.OS === "web" && styles.pickerWeb]}
+              // ✅ 안드로이드 기본 화살표 숨김(커스텀 화살표만 남기기)
+              dropdownIconColor={Platform.OS === "android" ? "transparent" : "#6B7280"}
+              mode="dropdown"
+            >
+              {quarterOptions.map((q) => (
+                <Picker.Item key={q} label={q === "ALL" ? "전체" : q} value={q} />
+              ))}
+            </Picker>
+
+            {/* ✅ 커스텀 화살표: 웹/안드로이드만 표시 (iOS는 기본 UX가 달라서 보통 안 붙임) */}
+            {(Platform.OS === "web" || Platform.OS === "android") && (
+              <View pointerEvents="none" style={styles.pickerChevron}>
+                <FontAwesome5 name="chevron-down" size={14} color="#6B7280" />
+              </View>
+            )}
+          </View>
         </View>
       </View>
+
 
       {/* 수업 카드 목록 */}
       {filteredRows.map((r, index) => {
@@ -164,4 +184,53 @@ const styles = StyleSheet.create({
   openShiftTitle: { fontSize: 12, fontWeight: "900", color: "#4F46E5", marginBottom: 6 },
   openShiftText: { fontSize: 16, fontWeight: "800", color: "#111827" },
   openShiftHint: { marginTop: 6, fontSize: 12, color: "#6B7280" },
+
+  // 선택 상자 이쁘게
+  pickerShell: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  pickerInner: {
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+  },
+
+  picker: {
+    height: 44,
+    width: "100%",
+    color: "#111827",
+    backgroundColor: "transparent",
+    // ✅ Picker(특히 웹 select)의 기본 테두리가 튀지 않게
+    borderWidth: 0,
+  },
+
+  // ✅ 웹에서 <select> 기본 검은 테두리/포커스 아웃라인/기본 화살표 제거
+  pickerWeb: {
+    outlineStyle: "none",
+    outlineWidth: 0,
+    borderWidth: 0,
+
+    // @ts-ignore (RN Web 전용 CSS)
+    appearance: "none",
+    // @ts-ignore
+    WebkitAppearance: "none",
+    // @ts-ignore
+    MozAppearance: "none",
+
+    paddingRight: 36, // 커스텀 화살표 공간 확보
+  },
+
+  pickerChevron: {
+    position: "absolute",
+    right: 12,
+    top: 0,
+    height: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
 });
