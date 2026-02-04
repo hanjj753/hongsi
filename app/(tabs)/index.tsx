@@ -121,38 +121,48 @@ export default function HomeScreen() {
 
   const registerUserToSheet = async (userData: any, dId: string | null) => {
     if (!userData || !userData.email) return;
-    
-    // 기본값은 구글 프로필 이름
-    let finalName = userData.displayName || "이름 없음";
 
     try {
-      // 1. [조교 정보] 시트에서 이메일로 실명 찾기
+      // 1. [조교 정보] 시트 먼저 조회 (보안 체크)
       const assistantData = await fetchSheetData(CSV_URLS.ASSISTANT_INFO);
       
+      let myRecord = null;
       if (Array.isArray(assistantData)) {
-        const myRecord = assistantData.find((r: any) => 
+        myRecord = assistantData.find((r: any) => 
           String(r[ASSISTANT_HEADERS.EMAIL] || "").trim().toLowerCase() === userData.email.trim().toLowerCase()
         );
-        
-        // 매칭되는 조교 정보가 있고, 성명이 있다면 그 이름 사용!
-        if (myRecord && myRecord[ASSISTANT_HEADERS.NAME]) {
-          finalName = myRecord[ASSISTANT_HEADERS.NAME];
-        }
       }
-    } catch (e) {
-      console.error("조교 이름 매칭 실패 (구글 이름 사용)", e);
-    }
 
-    // 2. 서버에 등록 요청 (찾아낸 이름으로)
-    try {
+      // 명단에 내 이메일이 없다면? -> 로그인 거부!
+      if (!myRecord) {
+        // 1) 경고창 띄우기
+        showAlert(
+          "로그인 거부", 
+          "귀하의 정보가 [조교 정보] 시트에 등록되어 있지 않습니다.\n\n앱을 사용하려면 Admin 또는 Manager에게\n조교 정보 추가를 먼저 요청해주세요."
+        );
+        
+        // 2) 강제 로그아웃 (즉시 튕겨냄)
+        handleLogout(); 
+        
+        // 3) 함수 종료 (권한 관리 시트에 등록하지 않음)
+        return; 
+      }
+
+      // 2. 통과된 경우: 시트에 있는 실명 가져오기
+      // (만약 시트에 이름이 비어있으면 구글 이름 사용)
+      const finalName = myRecord[ASSISTANT_HEADERS.NAME] || userData.displayName || "이름 없음";
+
+      // 3. [앱 권한 관리] 시트에 등록 요청 (실명 사용)
       await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.PERMISSIONS, {
         action: "register_user",
         name: finalName, 
         email: userData.email,
         deviceId: dId || "", 
       });
+
     } catch (e) {
-      console.error("유저 등록 실패", e);
+      console.error("유저 등록 확인 중 오류", e);
+      // 에러 발생 시에도 보안을 위해 등록 로직이 실행되지 않도록 함
     }
   };
 

@@ -148,6 +148,7 @@ export default function ClassScreen() {
         const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();
         const end = String(r[CLASSES_HEADERS.CLASS_END] ?? "").trim();
         const quarter = String(r[CLASSES_HEADERS.QUARTER] ?? "").trim();
+        const workers = String(r[CLASSES_HEADERS.WORKERS] ?? "-").trim();
 
         return (
           <Pressable key={`${id}-${index}`} style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]} onPress={() => router.push({ pathname: "/class/[id]", params: { id } })}>
@@ -158,6 +159,9 @@ export default function ClassScreen() {
               {(school || quarter) && <Text style={styles.meta}>{quarter}</Text>}
               <View style={styles.lineRow}><Text style={styles.lineLabel}>장소</Text><Text style={styles.lineValue}>{place || "-"}</Text></View>
               <View style={styles.lineRow}><Text style={styles.lineLabel}>시간</Text><Text style={styles.lineValue}>{start || end ? `${start} ~ ${end}` : "-"}</Text></View>
+              <View style={styles.lineRow}><Text style={styles.lineLabel}>근무자</Text><Text style={styles.lineValue}>{workers}</Text>
+              </View>
+            
             </View>
           </Pressable>
         );

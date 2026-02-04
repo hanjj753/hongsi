@@ -610,6 +610,13 @@ export default function ClassDetailScreen() {
             </View>
         </View>
 
+        <View style={[styles.infoRow, { marginTop: -10 }]}> 
+            <View style={styles.infoItem}>
+                <Text style={styles.label}>근무자</Text>
+                <Text style={styles.value}>{String(row[CLASSES_HEADERS.WORKERS] ?? "-")}</Text>
+            </View>
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>출근 관리</Text>
           <Text style={styles.desc}>{attendanceSpot ? `기준 위치: ${attendanceSpot.name} (반경 ${attendanceSpot.radiusMeters}m)` : "❗ 위치 정보를 찾을 수 없습니다."}</Text>
