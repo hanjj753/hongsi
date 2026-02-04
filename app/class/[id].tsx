@@ -15,7 +15,7 @@ import { getClassUrls } from "../../utils/classInfo";
 
 // PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS, 
-  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, PERMISSION_HEADERS } from "../../config/sheetConfig";
+  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
 // import { ADMIN_DEVICE_IDS } from "../../config/adminConfig"; 
 
 import { INDIVIDUAL_MESSAGE_TEMPLATE } from "../../config/messageConfig";
@@ -77,6 +77,7 @@ export default function ClassDetailScreen() {
   const [noticeMsg, setNoticeMsg] = useState("");
   const [individualMsg, setIndividualMsg] = useState("");
   const [sessionNum, setSessionNum] = useState("");
+  const [workerName, setWorkerName] = useState("");
 
   const [template, setTemplate] = useState(INDIVIDUAL_MESSAGE_TEMPLATE);
 
@@ -150,7 +151,12 @@ export default function ClassDetailScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [cData, pData] = await Promise.all([fetchSheetData(CSV_URLS.CLASSES), fetchSheetData(CSV_URLS.POSITIONS)]);
+        const [cData, pData, aData] = await Promise.all([
+          fetchSheetData(CSV_URLS.CLASSES), 
+          fetchSheetData(CSV_URLS.POSITIONS),
+          fetchSheetData(CSV_URLS.ASSISTANT_INFO)
+        ]);
+
         setRow((cData || []).find((r: any) => String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() === targetId) || null);
         
         const map = new Map<string, string>();
@@ -160,6 +166,18 @@ export default function ClassDetailScreen() {
           if (key && val) map.set(key, val);
         });
         setPosMap(map);
+
+        if (Array.isArray(aData) && userEmail) {
+          const myRecord = aData.find((r: any) => 
+            String(r[ASSISTANT_HEADERS.EMAIL] || "").trim().toLowerCase() === userEmail.trim().toLowerCase()
+          );
+          if (myRecord && myRecord[ASSISTANT_HEADERS.NAME]) {
+            setWorkerName(myRecord[ASSISTANT_HEADERS.NAME]);
+          } else {
+            setWorkerName("이름 없음"); // 시트에 정보가 없을 경우 대비
+          }
+        }
+
       } finally { setLoading(false); }
     })();
   }, [targetId]);
@@ -248,7 +266,7 @@ export default function ClassDetailScreen() {
       [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(),
       [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
       [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
-      [ATTENDANCE_LOG_HEADERS.WORKERS]: String(row![CLASSES_HEADERS.WORKERS] ?? "").trim(),
+      [ATTENDANCE_LOG_HEADERS.WORKERS]: workerName || "이름 없음",
       [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail,
       [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: startTime,
       [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: "",

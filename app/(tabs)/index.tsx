@@ -68,12 +68,24 @@ export default function HomeScreen() {
   // 상태 관리
   const [androidId, setAndroidId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false); 
+  const [isManager, setIsManager] = useState(false);
 
   // 모달 관련 상태
   const [modalVisible, setModalVisible] = useState(false);
   const [targetEmail, setTargetEmail] = useState("");
   const [targetRole, setTargetRole] = useState<"Admin" | "Manager">("Manager");
   const [processing, setProcessing] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [newAssistant, setNewAssistant] = useState({
+    position: "조교", // 기본값
+    name: "",
+    phone: "",
+    email: "",
+    role: "현장",
+    startDate: "",
+    account: "",
+    status: "현역"
+  });
 
   // 웹/앱 호환 알림 함수
   const showAlert = (title: string, message: string) => {
@@ -157,9 +169,8 @@ export default function HomeScreen() {
 
         if (myRecord) {
           const role = String(myRecord[PERMISSION_HEADERS.ROLE] || "").trim();
-          if (role === 'Admin') {
-            setIsAdmin(true);
-          }
+          if (role === 'Admin') setIsAdmin(true);
+          if (role === 'Manager') setIsManager(true);
         }
       }
     } catch (e) {
@@ -304,6 +315,39 @@ export default function HomeScreen() {
     }
   };
 
+  const handleAddAssistant = async () => {
+    if (!newAssistant.name || !newAssistant.email) {
+      showAlert("입력 오류", "이름과 이메일은 필수입니다.");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const res = await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.ASSISTANT_INFO, {
+        action: "add_assistant",
+        ...newAssistant
+      });
+
+      if (res.ok) {
+        showAlert("성공", `${newAssistant.name} 조교 정보를 추가했습니다.`);
+        setAddModalVisible(false);
+        // 입력창 초기화
+        setNewAssistant({ position: "조교", name: "", phone: "", email: "", role: "현장", startDate: "", account: "", status: "현역" });
+      } else {
+        showAlert("실패", res.error || "추가 실패");
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("오류", "요청 중 문제가 발생했습니다.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const updateNewAssistant = (key: string, value: string) => {
+    setNewAssistant(prev => ({ ...prev, [key]: value }));
+  };
+
   if (loading && !refreshing) {
     return <View style={styles.center}><ActivityIndicator /></View>;
   }
@@ -347,56 +391,73 @@ export default function HomeScreen() {
               </View>
             )}
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>월 선택</Text>
-              <View style={styles.pickerBox}>
-                <Picker selectedValue={selectedMonth} onValueChange={setSelectedMonth} style={{ height: 50 }}>
-                  {monthOptions.map(m => <Picker.Item key={m} label={m} value={m} />)}
-                </Picker>
-              </View>
-            </View>
+            {(isAdmin || isManager) && (
+              <TouchableOpacity 
+                style={[styles.reqBtnManager, { marginTop: 10, backgroundColor: '#10B981' }]} 
+                onPress={() => setAddModalVisible(true)}
+              >
+                <Text style={styles.reqBtnText}>+ 조교 정보 시트에 추가</Text>
+              </TouchableOpacity>
+            )}
 
-            {selectedMonth ? (
-              <View style={styles.section}>
-                <Text style={styles.tableTitle}>{selectedMonth} 근무 요약</Text>
-                <View style={styles.table}>
-                  <View style={styles.trHead}>
-                    <Text style={styles.th}>총 근무 시간</Text>
-                    <Text style={styles.th}>근무 횟수</Text>
-                  </View>
-                  <View style={styles.tr}>
-                    <Text style={styles.td}>{monthSummary.totalTime}</Text>
-                    <Text style={styles.td}>{monthSummary.count}회</Text>
+            {rows.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyStateText}>근무 기록이 없습니다.</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>월 선택</Text>
+                  <View style={styles.pickerBox}>
+                    <Picker selectedValue={selectedMonth} onValueChange={setSelectedMonth} style={{ height: 50 }}>
+                      {monthOptions.map(m => <Picker.Item key={m} label={m} value={m} />)}
+                    </Picker>
                   </View>
                 </View>
-              </View>
-            ) : null}
 
-            {selectedMonth ? (
-              <View style={styles.section}>
-                <Text style={styles.tableTitle}>상세 기록</Text>
-                <View style={styles.table}>
-                  <View style={styles.trHead}>
-                    <Text style={[styles.th, { flex: 0.8 }]}>날짜</Text>
-                    <Text style={[styles.th, { flex: 1.2 }]}>수업</Text>
-                    <Text style={styles.th}>시간</Text>
-                  </View>
-                  {monthRows.length === 0 ? (
-                    <Text style={styles.noData}>기록이 없습니다.</Text>
-                  ) : (
-                    monthRows.map((r, i) => (
-                      <View key={i} style={styles.tr}>
-                        <Text style={[styles.td, { flex: 0.8 }]}>{r.date}</Text>
-                        <Text style={[styles.td, { flex: 1.2 }]}>{r.shift}</Text>
-                        <Text style={styles.td}>
-                          {r.end ? `${r.start}~${r.end}` : `${r.start} (근무중)`}
-                        </Text>
+                {selectedMonth ? (
+                  <View style={styles.section}>
+                    <Text style={styles.tableTitle}>{selectedMonth} 근무 요약</Text>
+                    <View style={styles.table}>
+                      <View style={styles.trHead}>
+                        <Text style={styles.th}>총 근무 시간</Text>
+                        <Text style={styles.th}>근무 횟수</Text>
                       </View>
-                    ))
-                  )}
-                </View>
-              </View>
-            ) : null}
+                      <View style={styles.tr}>
+                        <Text style={styles.td}>{monthSummary.totalTime}</Text>
+                        <Text style={styles.td}>{monthSummary.count}회</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : null}
+
+                {selectedMonth ? (
+                  <View style={styles.section}>
+                    <Text style={styles.tableTitle}>상세 기록</Text>
+                    <View style={styles.table}>
+                      <View style={styles.trHead}>
+                        <Text style={[styles.th, { flex: 0.8 }]}>날짜</Text>
+                        <Text style={[styles.th, { flex: 1.2 }]}>수업</Text>
+                        <Text style={styles.th}>시간</Text>
+                      </View>
+                      {monthRows.length === 0 ? (
+                        <Text style={styles.noData}>기록이 없습니다.</Text>
+                      ) : (
+                        monthRows.map((r, i) => (
+                          <View key={i} style={styles.tr}>
+                            <Text style={[styles.td, { flex: 0.8 }]}>{r.date}</Text>
+                            <Text style={[styles.td, { flex: 1.2 }]}>{r.shift}</Text>
+                            <Text style={styles.td}>
+                              {r.end ? `${r.start}~${r.end}` : `${r.start} (근무중)`}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
 
             <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
               <Text style={styles.logoutText}>로그아웃</Text>
@@ -452,6 +513,38 @@ export default function HomeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={addModalVisible}
+        onRequestClose={() => setAddModalVisible(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+          <View style={[styles.modalView, { width: '90%' }]}>
+            <Text style={styles.modalTitle}>새 조교 등록</Text>
+            
+            <ScrollView style={{ width: '100%', maxHeight: 400 }}>
+              <InputRow label="이름 (필수)" val={newAssistant.name} onChange={v => updateNewAssistant('name', v)} />
+              <InputRow label="Gmail (예: example@gmail.com)" val={newAssistant.email} onChange={v => updateNewAssistant('email', v)} type="email-address" />
+              <InputRow label="전화번호 (예: 010-1234-5678)" val={newAssistant.phone} onChange={v => updateNewAssistant('phone', v)} type="phone-pad" />
+              <InputRow label="직책 (예: 조교)" val={newAssistant.position} onChange={v => updateNewAssistant('position', v)} />
+              <InputRow label="역할 (예: 현장, 자료)" val={newAssistant.role} onChange={v => updateNewAssistant('role', v)} />
+              <InputRow label="근무 시작 (예: 2025년 1학기)" val={newAssistant.startDate} onChange={v => updateNewAssistant('startDate', v)} />
+              <InputRow label="계좌번호" val={newAssistant.account} onChange={v => updateNewAssistant('account', v)} />
+              <InputRow label="비고 (예: 현역)" val={newAssistant.status} onChange={v => updateNewAssistant('status', v)} />
+            </ScrollView>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setAddModalVisible(false)}>
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddAssistant}>
+                 {processing ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>추가</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -460,6 +553,24 @@ const InfoItem = ({ label, value }: { label: string, value: string }) => (
   <View style={{ flex: 1, alignItems: 'center' }}>
     <Text style={styles.label}>{label}</Text>
     <Text style={styles.value} numberOfLines={1}>{value}</Text>
+  </View>
+);
+
+const InputRow = ({ label, val, onChange, type = 'default' }: any) => (
+  <View style={{ marginBottom: 10 }}>
+    <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>{label}</Text>
+    <TextInput
+      style={[
+        styles.modalInput,
+        { color: '#111827' }, // 입력된 글자는 진한 검은색
+        !val && { fontStyle: 'italic' } // ⭐️ 값이 없으면(Placeholder 상태면) 기울임꼴
+      ]}
+      value={val}
+      onChangeText={onChange}
+      keyboardType={type}
+      placeholder={label}
+      placeholderTextColor="#9CA3AF" // ⭐️ Placeholder 글자색은 회색
+    />
   </View>
 );
 
@@ -505,4 +616,7 @@ const styles = StyleSheet.create({
   modalBtnConfirm: { backgroundColor: "#4F46E5" },
   modalBtnTextCancel: { color: "#374151", fontWeight: "700" },
   modalBtnTextConfirm: { color: "white", fontWeight: "700" },
+
+  emptyContainer: { marginTop: 60, alignItems: 'center', justifyContent: 'center' },
+  emptyStateText: { fontSize: 16, color: '#9CA3AF', fontWeight: '600' },
 });

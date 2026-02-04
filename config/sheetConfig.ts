@@ -26,7 +26,7 @@ export const API_URLS = {
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
     MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
 
-    // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
+    // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리]
     ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
 
 };
@@ -35,6 +35,7 @@ export const SHEET_NAMES = {
     PERMISSIONS: "앱 권한 관리", 
     ATTENDANCE: "조교_출석_현황", 
     MESSAGE_LOG: "메시지 log",
+    ASSISTANT_INFO: "조교 정보",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
@@ -66,7 +67,7 @@ export const ATTENDANCE_LOG_HEADERS = {
   QUARTER: "분기",
   CLASS_NAME: "수업",
   DAY: "요일", 
-  WORKERS: "근무자", // 수업 생성 시트의 WORKERS와 동일
+  WORKERS: "출근자", 
   WORKER_EMAIL: "출근자 Email",
   ATTENDANCE_START: "출근 시간",
   ATTENDANCE_END: "퇴근 시간",
