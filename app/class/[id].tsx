@@ -522,6 +522,8 @@ export default function ClassDetailScreen() {
                     console.error("SMS 전송 실패:", phone, e);
                     failCount++;
                     lastError = e.message || String(e);
+                    lastError = e.message || String(e);
+                    showAlert("발송 실패 (디버깅)", `번호: ${cleanPhone}\n에러내용: ${lastError}`);
                   }
                 }
                 
