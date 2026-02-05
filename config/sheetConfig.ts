@@ -4,8 +4,11 @@ export const CSV_URLS = {
     // 수업 생성 시트 - [웹/앱] / [수업 생성 시트] / [마스터 시트 생성용]
     CLASSES : "REMOVED_PRIVATE_SHEET_URL",
 
-    // 조교 출석 시트 - [웹/앱] / [data] / [Data_Storage] / [조교_출석 현황]
+    // 조교 출석 시트 - [웹/앱] / [data] / [Data_Storage] / [조교_출석_현황]
     ATTENDANCE_LOG : "REMOVED_PRIVATE_SHEET_URL",
+
+    // 수업 일정 시트 - [웹/앱] / [data] / [Data_Storage] / [전체_수업_일정]
+    CLASS_SCHEDULES: "REMOVED_PRIVATE_SHEET_URL",
 
     // 수업 위치 시트 - [웹/앱] / [data] / [Data_Storage] / [수업_장소들]
     POSITIONS : "REMOVED_PRIVATE_SHEET_URL",
@@ -15,7 +18,8 @@ export const CSV_URLS = {
 
     // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
     PERMISSIONS : "REMOVED_PRIVATE_SHEET_URL",
-};
+
+  };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
 export const API_URLS = {
@@ -36,6 +40,7 @@ export const SHEET_NAMES = {
     ATTENDANCE: "조교_출석_현황", 
     MESSAGE_LOG: "메시지 log",
     ASSISTANT_INFO: "조교 정보",
+    SCHEDULE: "전체_수업_일정",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
@@ -148,4 +153,16 @@ export const PERMISSION_HEADERS = {
   ROLE: "권한",
   DEVICE_ID: "Device ID",
   STATUS: "상태",
+};
+
+// 수업 일정 시트 - [웹/앱] / [data] / [Data_Storage] / [전체_수업_일정]
+export const SCHEDULE_HEADERS = {
+    CLASS_ID: "수업ID",
+    QUARTER: "분기",
+    CLASS_NAME: "수업",
+    DAY: "요일",
+    SESSION: "차시",
+    DATE: "날짜",
+    WORKERS: "예정 근무자",
+    NOTE: "설명",
 };
