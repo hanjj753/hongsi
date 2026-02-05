@@ -23,7 +23,15 @@ export default function TabLayout() {
           tabBarIcon: ({color, size}) => <FontAwesome5 name="chalkboard" size={size} color={color} />,
         }}
       />
-      {/* 3. 조교 탭 */}
+      {/* 3. 달력 탭 */}
+      <Tabs.Screen
+        name="calendar"
+        options={{
+          title: '달력',
+          tabBarIcon: ({color, size}) => <FontAwesome5 name="calendar-alt" size={size} color={color} />,
+        }}
+      />
+      {/* 4. 조교 탭 */}
       <Tabs.Screen
         name="assistant"
         options={{
@@ -31,7 +39,7 @@ export default function TabLayout() {
           tabBarIcon: ({color, size}) => <Ionicons name="people-outline" size={size} color={color} />,
         }}
       />
-      {/* 4. 파일 탭 */}
+      {/* 5. 파일 탭 */}
       <Tabs.Screen
         name="files"
         options={{
