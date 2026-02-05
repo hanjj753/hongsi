@@ -8,17 +8,7 @@
 // 2) 아래 PUBLIC_ICAL_URL에 넣기
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  ScrollView,
-  RefreshControl,
-  Pressable,
-  Linking,
-  Platform,
-} from "react-native";
+import {View, Text, StyleSheet, ActivityIndicator, ScrollView, RefreshControl, Pressable, Linking, Platform, } from "react-native";
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 
 // ====== 설정(여기만 채우면 동작) ======

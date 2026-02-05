@@ -1,9 +1,10 @@
 // app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
 import * as Location from "expo-location";
 import * as Application from "expo-application";
+import { Calendar, LocaleConfig } from 'react-native-calendars';
 
 // Utils & Config
 import { fetchSheetData, fetchClassSheet, fetchClassSheetRaw } from "../../utils/googleSheet_csv";
@@ -15,10 +16,20 @@ import { getClassUrls } from "../../utils/classInfo";
 
 // PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS, 
-  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
+  CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, 
+  PERMISSION_HEADERS, ASSISTANT_HEADERS, SCHEDULE_HEADERS,  } from "../../config/sheetConfig";
 // import { ADMIN_DEVICE_IDS } from "../../config/adminConfig"; 
 
 import { INDIVIDUAL_MESSAGE_TEMPLATE } from "../../config/messageConfig";
+
+LocaleConfig.locales['kr'] = {
+  monthNames: ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'],
+  monthNamesShort: ['1.','2.','3.','4.','5.','6.','7.','8.','9.','10.','11.','12.'],
+  dayNames: ['일요일','월요일','화요일','수요일','목요일','금요일','토요일'],
+  dayNamesShort: ['일','월','화','수','목','금','토'],
+  today: "오늘"
+};
+LocaleConfig.defaultLocale = 'kr';
 
 // Constants
 const WARN_RADIUS_METERS = 30; 
@@ -79,7 +90,18 @@ export default function ClassDetailScreen() {
   const [sessionNum, setSessionNum] = useState("");
   const [workerName, setWorkerName] = useState("");
 
+  const [scheduleRows, setScheduleRows] = useState<any[]>([]);
+
+  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [scheduleSession, setScheduleSession] = useState("");
+  const [scheduleNote, setScheduleNote] = useState("");
+  const [scheduleWorkers, setScheduleWorkers] = useState("");
+
   const [template, setTemplate] = useState(INDIVIDUAL_MESSAGE_TEMPLATE);
+  const [isAdmin, setIsAdmin] = useState(false);       // 이메일이 Admin인 경우
+  const [isManager, setIsManager] = useState(false);    // 이메일이 Manager인 경우
+  const [isAdminDevice, setIsAdminDevice] = useState(false); // Admin이면서 + 기기 ID까지 일치하는 경우
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -106,55 +128,55 @@ export default function ClassDetailScreen() {
     );
   };
 
-  const [isAdminDevice, setIsAdminDevice] = useState(false);
-
   // 시트 데이터를 기반으로 Admin 권한 확인
   useEffect(() => {
-    const checkAdmin = async () => {
-      // 안드로이드가 아니면 패스 (문자 발송 기능은 안드로이드 전용)
-      if (Platform.OS !== 'android') return;
+    const checkPermissions = async () => {
       if (!userEmail) return;
 
       try {
-        const androidId = Application.getAndroidId();
-        if (!androidId) return;
-
-        // 1. 권한 시트 CSV 가져오기
         const data = await fetchSheetData(CSV_URLS.PERMISSIONS);
         if (!Array.isArray(data)) return;
 
-        // 2. 내 이메일 & Device ID가 일치하는 행 찾기
+        // 내 이메일과 일치하는 행 찾기
         const myRecord = data.find((r: any) => {
            const sheetEmail = String(r[PERMISSION_HEADERS.EMAIL] || "").trim().toLowerCase();
-           const sheetDeviceId = String(r[PERMISSION_HEADERS.DEVICE_ID] || "").trim();
-           return sheetEmail === userEmail.toLowerCase() && sheetDeviceId === androidId;
+           return sheetEmail === userEmail.toLowerCase();
         });
 
-        // 3. 권한이 'Admin'인지 확인
         if (myRecord) {
           const role = String(myRecord[PERMISSION_HEADERS.ROLE] || "").trim();
-          if (role === 'Admin') {
-            setIsAdminDevice(true);
+          const sheetDeviceId = String(myRecord[PERMISSION_HEADERS.DEVICE_ID] || "").trim();
+          
+          // 1. 역할(Role) 체크
+          if (role === 'Admin') setIsAdmin(true);
+          if (role === 'Manager') setIsManager(true);
+
+          // 2. 기기(Device) 체크 (Admin인 경우에만 추가 검증)
+          if (role === 'Admin' && Platform.OS === 'android') {
+             const currentDeviceId = Application.getAndroidId();
+             // 시트에 등록된 ID와 현재 기기 ID가 같아야 함
+             if (sheetDeviceId && currentDeviceId === sheetDeviceId) {
+               setIsAdminDevice(true);
+             }
           }
         }
       } catch (e) {
-        console.error("Admin check failed", e);
+        console.error("Permission check failed", e);
       }
     };
 
-    checkAdmin();
-  }, [userEmail]); // userEmail이 로드되면 실행
-
-  // ... (나머지 코드들은 기존과 동일합니다. 아래 코드는 그대로 두세요) ...
+    checkPermissions();
+  }, [userEmail]);
   
   // 1. 데이터 로드
   useEffect(() => {
     (async () => {
       try {
-        const [cData, pData, aData] = await Promise.all([
+        const [cData, pData, aData, sData] = await Promise.all([
           fetchSheetData(CSV_URLS.CLASSES), 
           fetchSheetData(CSV_URLS.POSITIONS),
-          fetchSheetData(CSV_URLS.ASSISTANT_INFO)
+          fetchSheetData(CSV_URLS.ASSISTANT_INFO),
+          fetchSheetData(CSV_URLS.CLASS_SCHEDULES)
         ]);
 
         setRow((cData || []).find((r: any) => String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() === targetId) || null);
@@ -178,9 +200,30 @@ export default function ClassDetailScreen() {
           }
         }
 
+        if (Array.isArray(sData)) {
+          const mySchedules = sData.filter((r: any) => 
+            String(r[SCHEDULE_HEADERS.CLASS_ID] ?? "").trim() === targetId
+          );
+          
+          // 차시(SESSION) 기준으로 오름차순 정렬 (숫자 변환)
+          mySchedules.sort((a: any, b: any) => {
+            const sA = Number(a[SCHEDULE_HEADERS.SESSION]) || 0;
+            const sB = Number(b[SCHEDULE_HEADERS.SESSION]) || 0;
+            return sA - sB;
+          });
+          
+          setScheduleRows(mySchedules);
+        }
+
       } finally { setLoading(false); }
     })();
   }, [targetId]);
+
+  useEffect(() => {
+    if (row) {
+      setScheduleWorkers(String(row[CLASSES_HEADERS.WORKERS] ?? ""));
+    }
+  }, [row]);
 
   // 2. 파생 정보
   const classTitle = useMemo(() => {
@@ -582,6 +625,45 @@ export default function ClassDetailScreen() {
     );
   };
 
+  const handleAddSchedule = async () => {
+    if (!selectedDate) { showAlert("알림", "날짜를 선택해주세요."); return; }
+    if (!scheduleSession) { showAlert("알림", "차시를 입력해주세요."); return; }
+
+    setSaving(true);
+    try {
+      const payload = {
+        action: "add_class_schedule",
+        classId: targetId,
+        quarter: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
+        className: classTitle,
+        day: String(row[CLASSES_HEADERS.DAY] ?? ""),
+        session: scheduleSession,
+        date: selectedDate,
+        workers: scheduleWorkers,
+        note: scheduleNote
+      };
+
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.SCHEDULE, payload);
+      
+      if (res.ok) {
+        showAlert("성공", `${selectedDate}에 ${scheduleSession}차시 일정이 등록되었습니다.`);
+        setScheduleModalVisible(false);
+        // 입력값 초기화
+        setScheduleSession("");
+        setScheduleNote("");
+        setSelectedDate("");
+        // (선택) 여기서 데이터를 다시 로드하면 베스트입니다 (loadAttendanceStatus 호출 등)
+      } else {
+        showAlert("실패", res.error || "등록 실패");
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("오류", "전송 중 문제가 발생했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
   if (!row) return <View style={styles.container}><Text>수업 정보를 찾을 수 없습니다.</Text></View>;
 
@@ -615,6 +697,40 @@ export default function ClassDetailScreen() {
                 <Text style={styles.label}>근무자</Text>
                 <Text style={styles.value}>{String(row[CLASSES_HEADERS.WORKERS] ?? "-")}</Text>
             </View>
+        </View>
+
+        <View style={styles.card}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <Text style={[styles.cardTitle, { marginBottom: 0 }]}>수업 일정</Text>
+            
+            {/* 권한이 있을 때만 버튼 표시 (isAdminDevice 활용) */}
+            {(isAdmin || isManager) && (
+              <Pressable onPress={() => setScheduleModalVisible(true)} hitSlop={10}>
+                <Text style={{ color: '#4F46E5', fontWeight: '700', fontSize: 14 }}>+ 일정 추가</Text>
+              </Pressable>
+            )}
+          </View>
+          
+          {scheduleRows.length === 0 ? (
+            <Text style={styles.desc}>등록된 일정이 없습니다.</Text>
+          ) : (
+            <View style={styles.table}>
+              <View style={styles.trHead}>
+                <Text style={[styles.th, { flex: 0.6 }]}>차시</Text>
+                <Text style={[styles.th, { flex: 1.6 }]}>날짜</Text>
+                <Text style={[styles.th, { flex: 1.2 }]}>근무자</Text>
+                <Text style={[styles.th, { flex: 2 }]}>비고</Text>
+              </View>
+              {scheduleRows.map((item, idx) => (
+                <View key={idx} style={styles.tr}>
+                  <Text style={[styles.td, { flex: 0.6 }]}>{String(item[SCHEDULE_HEADERS.SESSION] ?? "")}</Text>
+                  <Text style={[styles.td, { flex: 1.6 }]}>{String(item[SCHEDULE_HEADERS.DATE] ?? "")}</Text>
+                  <Text style={[styles.td, { flex: 1.2 }]}>{String(item[SCHEDULE_HEADERS.WORKERS] ?? "")}</Text>
+                  <Text style={[styles.td, { flex: 2 }]}>{String(item[SCHEDULE_HEADERS.NOTE] ?? "")}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -712,6 +828,87 @@ export default function ClassDetailScreen() {
         )}
       </ScrollView>
 
+      <Modal visible={scheduleModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalView, { width: '90%', maxHeight: '85%' }]}>
+            <Text style={styles.modalTitle}>새 일정 등록</Text>
+            
+            <ScrollView style={{ width: '100%' }} contentContainerStyle={{ paddingBottom: 20 }}>
+              <Text style={styles.label}>날짜 선택: <Text style={{color:'#4F46E5', fontWeight:'bold'}}>{selectedDate || "(달력에서 선택)"}</Text></Text>
+              <Calendar
+                onDayPress={(day: any) => setSelectedDate(day.dateString)}
+                markedDates={{
+                  [selectedDate]: {selected: true, disableTouchEvent: true, selectedColor: 'orange'}
+                }}
+                theme={{
+                  selectedDayBackgroundColor: '#4F46E5',
+                  todayTextColor: '#4F46E5',
+                  arrowColor: '#4F46E5',
+                }}
+                style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginBottom: 15 }}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>차시</Text>
+                  <TextInput 
+                    style={[
+                      styles.modalInput, 
+                      !scheduleSession && { fontStyle: 'italic' }
+                    ]}
+                    placeholder="예: 1"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    value={scheduleSession}
+                    onChangeText={setScheduleSession}
+                  />
+                </View>
+                <View style={{ flex: 1.5 }}>
+                  <Text style={styles.label}>예정 근무자</Text>
+                  <TextInput 
+                    style={[
+                      styles.modalInput, 
+                      !scheduleWorkers && { fontStyle: 'italic' }
+                    ]}
+                    placeholder="이름 입력" 
+                    placeholderTextColor="#9CA3AF"
+                    value={scheduleWorkers}
+                    onChangeText={setScheduleWorkers}
+                  />
+                </View>
+              </View>
+
+              <View style={{ marginBottom: 10 }}>
+                <Text style={styles.label}>비고</Text>
+                <TextInput 
+                  style={[
+                    styles.modalInput,
+                    !scheduleNote && { fontStyle: 'italic' }
+                  ]}
+                  placeholder="예: 정기 수업, 보강, 클리닉, 직보 등"
+                  placeholderTextColor="#9CA3AF"
+                  value={scheduleNote}
+                  onChangeText={setScheduleNote}
+                />
+              </View>
+
+              <Text style={{ fontSize: 12, color: '#666', marginTop: 5 }}>
+                • 수업: {classTitle}
+              </Text>
+            </ScrollView>
+
+            <View style={styles.modalBtnRow}>
+              <Pressable style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setScheduleModalVisible(false)}>
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddSchedule}>
+                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>등록</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Pressable disabled={fabDisabled} onPress={checkedIn ? handleCheckOut : handleCheckIn} style={[styles.fab, fabDisabled ? { opacity: 0.5 } : checkedIn ? { backgroundColor: "#4B5563" } : { backgroundColor: "#4F46E5" }]}>
         <Text style={styles.fabText}>{checkedIn ? "퇴근" : "출근"}</Text>
       </Pressable>
@@ -745,4 +942,21 @@ const styles = StyleSheet.create({
   
   fab: { position: "absolute", right: 20, bottom: 30, width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center", elevation: 6 },
   fabText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  modalView: { backgroundColor: "white", borderRadius: 12, padding: 20, alignItems: "center", shadowColor: "#000", elevation: 5 },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, color: "#1F2937" },
+  modalInput: { height: 46, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingHorizontal: 12, fontSize: 14, backgroundColor: "#F9FAFB", marginBottom: 0 },
+  modalBtnRow: { flexDirection: "row", gap: 10, width: "100%", marginTop: 10 },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
+  modalBtnCancel: { backgroundColor: "#E5E7EB" },
+  modalBtnConfirm: { backgroundColor: "#4F46E5" },
+  modalBtnTextCancel: { color: "#374151", fontWeight: "700" },
+  modalBtnTextConfirm: { color: "white", fontWeight: "700" },
+
+  table: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, overflow: 'hidden', marginTop: 8 },
+  trHead: { flexDirection: 'row', backgroundColor: '#f9f9f9', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#eee' },
+  tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee', paddingVertical: 12, alignItems: 'center' },
+  th: { fontSize: 12, fontWeight: '700', color: '#555', textAlign: 'center' },
+  td: { fontSize: 12, color: '#333', textAlign: 'center' },
 });

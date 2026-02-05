@@ -164,5 +164,5 @@ export const SCHEDULE_HEADERS = {
     SESSION: "차시",
     DATE: "날짜",
     WORKERS: "예정 근무자",
-    NOTE: "설명",
+    NOTE: "비고",
 };
