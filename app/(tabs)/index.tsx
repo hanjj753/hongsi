@@ -4,7 +4,6 @@ import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert, Scrol
 import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import * as Application from 'expo-application';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Firebase & Auth
 import auth from '@react-native-firebase/auth';
@@ -16,7 +15,6 @@ import { getCurrentUserEmail } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
 import { postSheetData } from "../../utils/sheetApi";
-import { scheduleCheckInNotifications } from '../../utils/notificationScheduler';
 
 // ==========================================
 // Types & Helpers

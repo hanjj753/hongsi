@@ -1,10 +1,11 @@
 // app/class/[id].tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid, Modal } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid, Modal, TouchableOpacity } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
 import * as Location from "expo-location";
 import * as Application from "expo-application";
 import { Calendar, LocaleConfig } from 'react-native-calendars';
+import { Ionicons } from "@expo/vector-icons";
 
 // Utils & Config
 import { fetchSheetData, fetchClassSheet, fetchClassSheetRaw } from "../../utils/googleSheet_csv";
@@ -104,6 +105,10 @@ export default function ClassDetailScreen() {
   const [isAdminDevice, setIsAdminDevice] = useState(false); // Admin이면서 + 기기 ID까지 일치하는 경우
 
   const [isEditMode, setIsEditMode] = useState(false);
+
+  const [studentSelectionModalVisible, setStudentSelectionModalVisible] = useState(false);
+  const [studentList, setStudentList] = useState<any[]>([]); // 불러온 학생 데이터 저장
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
 
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
@@ -433,20 +438,21 @@ export default function ClassDetailScreen() {
     }
   };
 
-  const handleSendIndividual = async () => {
+  const handleOpenStudentSelection = async () => {
     const session = parseInt(sessionNum);
     if (!session || isNaN(session) || session < 1) {
       Alert.alert("입력 오류", "올바른 차시(숫자)를 입력해주세요.");
       return;
     }
 
-    setSendingIndividual(true); 
+    setSendingIndividual(true);
     setIndividualMsg("");
 
     try {
       const urls = await getClassUrls(targetId);
       if (!urls || !urls.sheetUrl) {
         Alert.alert("오류", "시트 주소를 찾을 수 없습니다.");
+        setSendingIndividual(false);
         return;
       }
 
@@ -455,28 +461,75 @@ export default function ClassDetailScreen() {
 
       if (targets.length === 0) {
         Alert.alert("알림", "학생 데이터가 없습니다.");
+        setSendingIndividual(false);
         return;
       }
 
+      // 학생 데이터 매핑 (나중에 전송할 때 쓰기 위해 저장)
       const startIndex = CLASS_DATA_COL_SHIFT + (session - 1) * CLASS_SESSION_STRIDE;
-
-      const promises = targets.map((studentRow) => {
-        const studentName = studentRow[1];
-        const parentPhone = studentRow[3];
-        
-        if (!parentPhone) return Promise.resolve();
-
+      
+      const parsedStudents = targets.map(studentRow => {
+        const studentId = String(studentRow[0] || "");
+        const studentName = String(studentRow[1] || "이름없음");
+        const parentPhone = String(studentRow[3] || "");
         const attendance = studentRow[startIndex] || "-";
         const homework = studentRow[startIndex + 1] || "-";
         const test = studentRow[startIndex + 2] || "-";
 
+        return {
+          id: studentId,
+          name: studentName,
+          phone: parentPhone,
+          attendance,
+          homework,
+          test,
+        };
+      }).filter(s => s.phone); // 전화번호 없는 학생 제외
+
+      if (parsedStudents.length === 0) {
+        Alert.alert("알림", "학부모 전화번호가 있는 학생이 없습니다.");
+        setSendingIndividual(false);
+        return;
+      }
+
+      // 데이터 저장 및 모달 열기
+      setStudentList(parsedStudents);
+      // 기본적으로 모두 선택
+      const allIds = new Set(parsedStudents.map(s => s.id));
+      setSelectedStudentIds(allIds);
+      
+      setSendingIndividual(false); // 로딩 끝
+      setStudentSelectionModalVisible(true); // 모달 열기
+
+    } catch (error) {
+      console.error(error);
+      showAlert("오류", "데이터를 불러오는 중 문제가 발생했습니다.");
+      setSendingIndividual(false);
+    }
+  };
+
+  // ✅ [추가] 2단계: 선택된 학생들에게 메시지 전송 (모달 확인 버튼)
+  const confirmSendIndividual = async () => {
+    if (selectedStudentIds.size === 0) {
+      Alert.alert("알림", "선택된 학생이 없습니다.");
+      return;
+    }
+    
+    setStudentSelectionModalVisible(false); // 모달 닫기
+    setSendingIndividual(true); // 로딩 다시 시작
+    const session = parseInt(sessionNum); // 위에서 검증했으므로 안전
+
+    try {
+      const targets = studentList.filter(s => selectedStudentIds.has(s.id));
+      
+      const promises = targets.map((student) => {
         let content = template 
-          .split("${STUDENT_NAME}").join(studentName)
+          .split("${STUDENT_NAME}").join(student.name)
           .split("${QUARTER}").join(String(row[CLASSES_HEADERS.QUARTER] ?? "")) 
           .split("${SESSION}").join(String(session))
-          .split("${ATTENDANCE}").join(attendance)
-          .split("${HOMEWORK}").join(homework)
-          .split("${TEST}").join(test)
+          .split("${ATTENDANCE}").join(student.attendance)
+          .split("${HOMEWORK}").join(student.homework)
+          .split("${TEST}").join(student.test)
           .split("${CLASS_NAME}").join(classTitle) 
           .split("${DAY}").join(String(row[CLASSES_HEADERS.DAY] ?? ""));
 
@@ -485,9 +538,9 @@ export default function ClassDetailScreen() {
           [MESSAGE_LOG_HEADERS.QUARTER]: String(row[CLASSES_HEADERS.QUARTER] ?? ""), 
           [MESSAGE_LOG_HEADERS.CLASS_NAME]: classTitle,
           [MESSAGE_LOG_HEADERS.DAY]: String(row[CLASSES_HEADERS.DAY] ?? ""),        
-          [MESSAGE_LOG_HEADERS.ID]: studentRow[0],
-          [MESSAGE_LOG_HEADERS.STUDENT_NAME]: studentName,
-          [MESSAGE_LOG_HEADERS.PARENT_PHONE]: parentPhone,
+          [MESSAGE_LOG_HEADERS.ID]: student.id,
+          [MESSAGE_LOG_HEADERS.STUDENT_NAME]: student.name,
+          [MESSAGE_LOG_HEADERS.PARENT_PHONE]: student.phone,
           [MESSAGE_LOG_HEADERS.MESSAGE_STATUS]: "unsent",
           [MESSAGE_LOG_HEADERS.CONTENT]: content
         };
@@ -497,15 +550,31 @@ export default function ClassDetailScreen() {
 
       await Promise.all(promises);
 
-      setIndividualMsg(`${session}차시 메시지 등록 완료!`);
+      setIndividualMsg(`${session}차시 ${targets.length}명 전송 완료!`);
       setTimeout(() => setIndividualMsg(""), 3000); 
-      setSessionNum("");
+      setSessionNum(""); // 차시 초기화
 
     } catch (error) {
       console.error(error);
       showAlert("오류", "전송 중 문제가 발생했습니다.");
     } finally {
       setSendingIndividual(false); 
+    }
+  };
+
+  const toggleStudentSelection = (id: string) => {
+    const newSet = new Set(selectedStudentIds);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedStudentIds(newSet);
+  };
+  
+  // 전체 선택/해제
+  const toggleSelectAll = () => {
+    if (selectedStudentIds.size === studentList.length) {
+      setSelectedStudentIds(new Set()); // 전체 해제
+    } else {
+      setSelectedStudentIds(new Set(studentList.map(s => s.id))); // 전체 선택
     }
   };
 
@@ -983,16 +1052,12 @@ export default function ClassDetailScreen() {
           {sendingIndividual ? (
              <ActivityIndicator style={{marginTop: 10}} color="#10B981" />
           ) : (
-            <Pressable style={({ pressed }) => [styles.btnGreen, pressed && { opacity: 0.8 }]} onPress={handleSendIndividual}>
-              <Text style={styles.btnText}>문자 메시지 추가</Text>
+            <Pressable style={({ pressed }) => [styles.btnGreen, pressed && { opacity: 0.8 }]} onPress={handleOpenStudentSelection}>
+              <Text style={styles.btnText}>메시지 대상 선택</Text>
             </Pressable>
           )}
 
-          {!!individualMsg && (
-            <Text style={{ color: '#059669', fontWeight: '700', textAlign: 'center', marginTop: 12 }}>
-              {individualMsg}
-            </Text>
-          )}
+          {!!individualMsg && <Text style={{ color: '#059669', fontWeight: '700', textAlign: 'center', marginTop: 12 }}>{individualMsg}</Text>}
         </View>
 
         { isAdminDevice && (
@@ -1005,6 +1070,59 @@ export default function ClassDetailScreen() {
             </View>
         )}
       </ScrollView>
+
+      <Modal visible={studentSelectionModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalView, { width: '90%', maxHeight: '80%' }]}>
+            <Text style={styles.modalTitle}>메시지 전송 대상 선택</Text>
+            <Text style={[styles.desc, {textAlign: 'center'}]}>
+              {sessionNum}차시 데이터 기준 ({selectedStudentIds.size}/{studentList.length}명)
+            </Text>
+
+            <TouchableOpacity onPress={toggleSelectAll} style={{ padding: 8, marginBottom: 5 }}>
+              <Text style={{ color: '#4F46E5', fontWeight: '700' }}>
+                {selectedStudentIds.size === studentList.length ? "전체 해제" : "전체 선택"}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={{ flex: 1, width: '100%', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee' }}>
+              <ScrollView>
+                {studentList.map(student => {
+                  const isSelected = selectedStudentIds.has(student.id);
+                  return (
+                    <TouchableOpacity 
+                      key={student.id} 
+                      style={[styles.studentRow, isSelected && styles.studentRowSelected]} 
+                      onPress={() => toggleStudentSelection(student.id)}
+                    >
+                      <Ionicons 
+                        name={isSelected ? "checkbox" : "square-outline"} 
+                        size={22} 
+                        color={isSelected ? "#4F46E5" : "#ccc"} 
+                        style={{ marginRight: 12 }}
+                      />
+                      <View>
+                        <Text style={[styles.studentName, isSelected && { color: '#4F46E5' }]}>{student.name}</Text>
+                        <Text style={styles.studentInfo}>출석: {student.attendance} | 과제: {student.homework} | 시험: {student.test}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <View style={[styles.modalBtnRow, { marginTop: 15 }]}>
+              <Pressable style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setStudentSelectionModalVisible(false)}>
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </Pressable>
+              
+              <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={confirmSendIndividual}>
+                <Text style={styles.modalBtnTextConfirm}>메시지 추가 ({selectedStudentIds.size}명)</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={scheduleModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
@@ -1158,4 +1276,8 @@ const styles = StyleSheet.create({
   textFuture: { color: '#374151' },
 
   boxDetailText: { fontSize: 11, textAlign: 'center' },
+  studentRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f3f3' },
+  studentRowSelected: { backgroundColor: '#F5F3FF' },
+  studentName: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 2 },
+  studentInfo: { fontSize: 12, color: '#666' },
 });
