@@ -97,10 +97,10 @@ export default function ClassScreen() {
   }, [rows, selectedQuarter]);
 
   // 지도 앱 열기 핸들러
-  const openMap = (placeName: string, coordStr?: string) => {
+  const openMap = async (placeName: string, coordStr?: string) => {
     let lat = "", lng = "";
     
-    // 좌표 파싱
+    // 좌표 파싱 (예: "37.123, 127.123")
     if (coordStr && coordStr.includes(",")) {
       const parts = coordStr.split(",").map(s => s.trim());
       if (parts.length === 2) {
@@ -109,49 +109,65 @@ export default function ClassScreen() {
       }
     }
 
-    // 1. 웹(Web) 환경
+    // 1. 웹 (Web) 환경 -> 무조건 "검색 결과" 페이지로 이동 (새 탭)
     if (Platform.OS === 'web') {
       // 좌표가 있으면 "위도,경도"를 검색어로, 없으면 "장소명"을 검색어로 사용
       const query = (lat && lng) ? `${lat},${lng}` : placeName;
       
-      // 네이버 지도 검색 URL (새 탭으로 열기)
-      const webUrl = `https://map.naver.com/v5/search/${encodeURIComponent(query)}`;
+      // 네이버 지도 PC 버전 검색 URL
+      const webUrl = `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
       
       window.open(webUrl, '_blank'); 
       setMapModalVisible(false);
       return;
     }
 
-    // 2. 앱(App) 환경
-    let naverUrl = "";
-    let kakaoUrl = "";
-    let fallbackWebUrl = "";
+    // 2. 앱 (App) 환경 -> 네이버 지도 앱 / 카카오맵 앱 실행 시도
+    const handleError = () => {
+        // 지도 앱이 하나도 없을 경우 웹 검색 결과로 이동 (Fallback)
+        const query = (lat && lng) ? `${lat},${lng}` : placeName;
+        Linking.openURL(`https://map.naver.com/p/search/${encodeURIComponent(query)}`);
+    };
 
-    if (lat && lng) {
-      // 좌표 모드
-      naverUrl = `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(placeName)}&appname=com.myapp`;
-      kakaoUrl = `kakaomap://look?p=${lat},${lng}`;
-      fallbackWebUrl = `https://map.naver.com/v5/search/${encodeURIComponent(lat + "," + lng)}`;
-    } else {
-      // 검색 모드
-      naverUrl = `nmap://search?query=${encodeURIComponent(placeName)}&appname=com.myapp`;
-      kakaoUrl = `kakaomap://search?q=${encodeURIComponent(placeName)}`;
-      fallbackWebUrl = `https://map.naver.com/v5/search/${encodeURIComponent(placeName)}`;
-    }
-
-    Linking.canOpenURL(naverUrl).then(supported => {
-      if (supported) {
-        Linking.openURL(naverUrl);
+    try {
+      if (lat && lng) {
+        // [A] 좌표 있음 -> "핀(Pin)" 찍기 모드
+        const naverApp = `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(placeName)}&appname=com.myapp`;
+        const kakaoApp = `kakaomap://look?p=${lat},${lng}`;
+        
+        const canNaver = await Linking.canOpenURL(naverApp);
+        if (canNaver) {
+            await Linking.openURL(naverApp);
+        } else {
+            const canKakao = await Linking.canOpenURL(kakaoApp);
+            if (canKakao) {
+                await Linking.openURL(kakaoApp);
+            } else {
+                handleError(); // 둘 다 없으면 웹으로
+            }
+        }
       } else {
-        Linking.canOpenURL(kakaoUrl).then(kSupported => {
-          if (kSupported) {
-            Linking.openURL(kakaoUrl);
-          } else {
-            Linking.openURL(fallbackWebUrl);
-          }
-        });
+        // [B] 좌표 없음 -> "검색" 모드
+        const naverSearch = `nmap://search?query=${encodeURIComponent(placeName)}&appname=com.myapp`;
+        const kakaoSearch = `kakaomap://search?q=${encodeURIComponent(placeName)}`;
+
+        const canNaver = await Linking.canOpenURL(naverSearch);
+        if (canNaver) {
+            await Linking.openURL(naverSearch);
+        } else {
+            const canKakao = await Linking.canOpenURL(kakaoSearch);
+            if (canKakao) {
+                await Linking.openURL(kakaoSearch);
+            } else {
+                handleError(); // 둘 다 없으면 웹으로
+            }
+        }
       }
-    });
+    } catch (e) {
+      console.warn(e);
+      handleError();
+    }
+    
     setMapModalVisible(false);
   };
 
@@ -193,18 +209,12 @@ export default function ClassScreen() {
                 selectedValue={selectedQuarter}
                 onValueChange={(val) => setSelectedQuarter(String(val))}
                 style={[styles.picker, Platform.OS === "web" && styles.pickerWeb]}
-                dropdownIconColor={Platform.OS === "android" ? "transparent" : "#6B7280"}
                 mode="dropdown"
               >
                 {quarterOptions.map((q) => (
                   <Picker.Item key={q} label={q === "ALL" ? "전체" : q} value={q} />
                 ))}
               </Picker>
-              {(Platform.OS === "web" || Platform.OS === "android") && (
-                <View pointerEvents="none" style={styles.pickerChevron}>
-                  <FontAwesome5 name="chevron-down" size={14} color="#6B7280" />
-                </View>
-              )}
             </View>
           </View>
         </View>
@@ -321,9 +331,9 @@ const styles = StyleSheet.create({
   openShiftHint: { marginTop: 6, fontSize: 12, color: "#6B7280" },
 
   pickerShell: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E5E7EB" },
-  pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative" },
-  picker: { height: 44, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
-  pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingRight: 36 },
+  pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative", justifyContent: 'center', height: 50, paddingRight: 12, },
+  picker: { height: 50, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
+  pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingLeft: 15 },
   pickerChevron: { position: "absolute", right: 12, top: 0, height: 44, justifyContent: "center", alignItems: "center" },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },

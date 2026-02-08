@@ -400,30 +400,33 @@ export default function CalendarScreen() {
           </Picker>
         </View>
         <View style={{ width: '92%', marginTop: 12, marginBottom: 5 }}>
-        <Text style={styles.label}>근무자 필터 (현역 조교)</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 20 }}>
-          {/* '전체 해제' 버튼 (선택된 게 있을 때만 표시하거나 항상 표시) */}
-          <Pressable 
-            style={[styles.chip, selectedAssistants.length === 0 && styles.chipActive]} 
-            onPress={() => setSelectedAssistants([])}
-          >
-            <Text style={[styles.chipText, selectedAssistants.length === 0 && styles.chipTextActive]}>전체</Text>
-          </Pressable>
+          <Text style={styles.label}>근무자 필터 (현역 조교)</Text>
+          
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            
+            {/* '전체' 버튼 */}
+            <Pressable 
+              style={[styles.chip, selectedAssistants.length === 0 && styles.chipActive]} 
+              onPress={() => setSelectedAssistants([])}
+            >
+              <Text style={[styles.chipText, selectedAssistants.length === 0 && styles.chipTextActive]}>전체</Text>
+            </Pressable>
 
-          {activeAssistants.map((name, idx) => {
-            const isSelected = selectedAssistants.includes(name);
-            return (
-              <Pressable 
-                key={`${name}-${idx}`} 
-                style={[styles.chip, isSelected && styles.chipActive]} 
-                onPress={() => toggleAssistant(name)}
-              >
-                <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{name}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
+            {/* 조교 목록 */}
+            {activeAssistants.map((name, idx) => {
+              const isSelected = selectedAssistants.includes(name);
+              return (
+                <Pressable 
+                  key={`${name}-${idx}`} 
+                  style={[styles.chip, isSelected && styles.chipActive]} 
+                  onPress={() => toggleAssistant(name)}
+                >
+                  <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>{name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </View>
 
       <View style={styles.calendarWrapper}>
