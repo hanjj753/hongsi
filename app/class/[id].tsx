@@ -103,6 +103,8 @@ export default function ClassDetailScreen() {
   const [isManager, setIsManager] = useState(false);    // 이메일이 Manager인 경우
   const [isAdminDevice, setIsAdminDevice] = useState(false); // Admin이면서 + 기기 ID까지 일치하는 경우
 
+  const [isEditMode, setIsEditMode] = useState(false);
+
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
       // 웹에서는 브라우저 기본 알림창 사용
@@ -625,14 +627,70 @@ export default function ClassDetailScreen() {
     );
   };
 
+  // 실제 삭제를 수행하는 함수 (Web/App 공통)
+  const processDelete = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        action: "delete_class_schedule",
+        classId: targetId,
+        session: scheduleSession, // 삭제할 차시 식별
+      };
+
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.SCHEDULE, payload);
+
+      if (res.ok) {
+        showAlert("삭제 완료", "일정이 삭제되었습니다.");
+        closeModal();
+        // 화면 즉시 갱신 (목록에서 제거)
+        setScheduleRows(prev => prev.filter(item => String(item[SCHEDULE_HEADERS.SESSION]) !== String(scheduleSession)));
+      } else {
+        showAlert("삭제 실패", res.error || "문제가 발생했습니다.");
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("오류", "삭제 중 오류가 발생했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteSchedule = () => {
+    // 🌐 웹 환경: 브라우저 기본 confirm 창 사용
+    if (Platform.OS === 'web') {
+      const ok = window.confirm(`${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`);
+      if (ok) {
+        processDelete();
+      }
+      return;
+    }
+
+    // 📱 앱 환경: React Native Alert 사용
+    Alert.alert(
+      "일정 삭제",
+      `${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`,
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "삭제",
+          style: "destructive", // 빨간색 강조 (iOS)
+          onPress: processDelete // 위에서 만든 함수 실행
+        }
+      ]
+    );
+  };
+
   const handleAddSchedule = async () => {
     if (!selectedDate) { showAlert("알림", "날짜를 선택해주세요."); return; }
     if (!scheduleSession) { showAlert("알림", "차시를 입력해주세요."); return; }
 
     setSaving(true);
     try {
+
+      const action = isEditMode ? "update_class_schedule" : "add_class_schedule";
+      
       const payload = {
-        action: "add_class_schedule",
+        action: action,
         classId: targetId,
         quarter: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
         className: classTitle,
@@ -646,15 +704,48 @@ export default function ClassDetailScreen() {
       const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.SCHEDULE, payload);
       
       if (res.ok) {
-        showAlert("성공", `${selectedDate}에 ${scheduleSession}차시 일정이 등록되었습니다.`);
-        setScheduleModalVisible(false);
-        // 입력값 초기화
-        setScheduleSession("");
-        setScheduleNote("");
-        setSelectedDate("");
-        // (선택) 여기서 데이터를 다시 로드하면 베스트입니다 (loadAttendanceStatus 호출 등)
+        const msg = isEditMode ? "일정이 수정되었습니다." : "새 일정이 등록되었습니다.";
+        showAlert("성공", msg);
+        
+        closeModal(); // 모달 닫기 및 초기화
+        
+        setScheduleRows(prevRows => {
+          if (isEditMode) {
+            // 1. 수정 모드: 기존 목록에서 해당 '차시'를 찾아서 내용만 갈아끼움
+            return prevRows.map(item => {
+              if (String(item[SCHEDULE_HEADERS.SESSION]) === String(scheduleSession)) {
+                return {
+                  ...item, // 기존 값 유지하면서
+                  [SCHEDULE_HEADERS.DATE]: selectedDate,     // 날짜 변경
+                  [SCHEDULE_HEADERS.WORKERS]: scheduleWorkers, // 근무자 변경
+                  [SCHEDULE_HEADERS.NOTE]: scheduleNote      // 비고 변경
+                };
+              }
+              return item;
+            });
+          } else {
+            // 2. 추가 모드: 새 객체를 만들어서 목록에 추가하고 정렬
+            const newRow = {
+              [SCHEDULE_HEADERS.CLASS_ID]: targetId,
+              [SCHEDULE_HEADERS.QUARTER]: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
+              [SCHEDULE_HEADERS.CLASS_NAME]: classTitle,
+              [SCHEDULE_HEADERS.DAY]: String(row[CLASSES_HEADERS.DAY] ?? ""),
+              [SCHEDULE_HEADERS.SESSION]: scheduleSession,
+              [SCHEDULE_HEADERS.DATE]: selectedDate,
+              [SCHEDULE_HEADERS.WORKERS]: scheduleWorkers,
+              [SCHEDULE_HEADERS.NOTE]: scheduleNote
+            };
+            const newList = [...prevRows, newRow];
+            
+            // 차시 순서대로 다시 정렬
+            return newList.sort((a: any, b: any) => 
+              (Number(a[SCHEDULE_HEADERS.SESSION]) || 0) - (Number(b[SCHEDULE_HEADERS.SESSION]) || 0)
+            );
+          }
+        });
+        
       } else {
-        showAlert("실패", res.error || "등록 실패");
+        showAlert("실패", res.error || "요청 실패");
       }
     } catch (e) {
       console.error(e);
@@ -662,6 +753,35 @@ export default function ClassDetailScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const closeModal = () => {
+    setScheduleModalVisible(false);
+    setIsEditMode(false); // 수정 모드 끄기
+    
+    // 입력값 초기화
+    setSelectedDate("");
+    setScheduleSession("");
+    setScheduleWorkers("");
+    setScheduleNote("");
+  };
+
+  const handlePressSchedule = (item: any) => {
+    // 권한 체크: 관리자(Admin)나 매니저(Manager)만 수정 가능
+    if (!isAdmin && !isManager) {
+      showAlert("권한 없음", "일정을 수정할 권한이 없습니다.");
+      return;
+    }
+
+    setIsEditMode(true); // 수정 모드 켜기
+
+    // 선택된 일정 데이터로 입력창 채우기
+    setSelectedDate(item[SCHEDULE_HEADERS.DATE]);
+    setScheduleSession(String(item[SCHEDULE_HEADERS.SESSION])); // 숫자인 경우 문자열로 변환
+    setScheduleWorkers(item[SCHEDULE_HEADERS.WORKERS] || "");
+    setScheduleNote(item[SCHEDULE_HEADERS.NOTE] || "");
+    
+    setScheduleModalVisible(true); // 모달 열기
   };
 
   if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
@@ -703,7 +823,6 @@ export default function ClassDetailScreen() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <Text style={[styles.cardTitle, { marginBottom: 0 }]}>수업 일정</Text>
             
-            {/* 권한이 있을 때만 버튼 표시 (isAdminDevice 활용) */}
             {(isAdmin || isManager) && (
               <Pressable onPress={() => setScheduleModalVisible(true)} hitSlop={10}>
                 <Text style={{ color: '#4F46E5', fontWeight: '700', fontSize: 14 }}>+ 일정 추가</Text>
@@ -714,22 +833,81 @@ export default function ClassDetailScreen() {
           {scheduleRows.length === 0 ? (
             <Text style={styles.desc}>등록된 일정이 없습니다.</Text>
           ) : (
-            <View style={styles.table}>
-              <View style={styles.trHead}>
-                <Text style={[styles.th, { flex: 0.6 }]}>차시</Text>
-                <Text style={[styles.th, { flex: 1.6 }]}>날짜</Text>
-                <Text style={[styles.th, { flex: 1.2 }]}>근무자</Text>
-                <Text style={[styles.th, { flex: 2 }]}>비고</Text>
+            <>
+              <View style={styles.scrollContainer}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {scheduleRows.map((item, idx) => {
+                    const today = todayYmd();
+                    const rowDate = String(item[SCHEDULE_HEADERS.DATE] ?? "");
+                    
+                    const firstFutureIndex = scheduleRows.findIndex(r => String(r[SCHEDULE_HEADERS.DATE]) >= today);
+                    
+                    let status = 'future';
+                    if (rowDate < today) status = 'past';
+                    else if (idx === firstFutureIndex) status = 'next';
+                    else status = 'future';
+
+                    let boxStyle = styles.boxFuture;
+                    let textStyle = styles.textFuture;
+                    
+                    if (status === 'past') {
+                      boxStyle = styles.boxPast;
+                      textStyle = styles.textPast;
+                    } else if (status === 'next') {
+                      boxStyle = styles.boxNext;
+                      textStyle = styles.textNext;
+                    }
+
+                    const dateParts = rowDate.split('-');
+                    const shortDate = dateParts.length === 3 ? `${Number(dateParts[1])}/${Number(dateParts[2])}` : rowDate;
+
+                    return (
+                      <Pressable 
+                        key={idx} 
+                        style={[styles.scheduleBox, boxStyle]}
+                        onPress={() => handlePressSchedule(item)} 
+                      >
+                        <Text style={[styles.boxSessionText, textStyle]}>
+                          {item[SCHEDULE_HEADERS.SESSION]}차시
+                        </Text>
+                        <Text style={[styles.boxDateText, textStyle]}>
+                          {shortDate}
+                        </Text>
+                        
+                        {!!item[SCHEDULE_HEADERS.WORKERS] && (
+                          <Text style={[styles.boxDetailText, textStyle, { fontWeight: '600' }]} numberOfLines={1}>
+                            {item[SCHEDULE_HEADERS.WORKERS]}
+                          </Text>
+                        )}
+                        
+                        {!!item[SCHEDULE_HEADERS.NOTE] && (
+                          <Text style={[styles.boxDetailText, textStyle, { fontSize: 10, marginTop: 2, opacity: 0.9 }]} numberOfLines={1}>
+                            {item[SCHEDULE_HEADERS.NOTE]}
+                          </Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
               </View>
-              {scheduleRows.map((item, idx) => (
-                <View key={idx} style={styles.tr}>
-                  <Text style={[styles.td, { flex: 0.6 }]}>{String(item[SCHEDULE_HEADERS.SESSION] ?? "")}</Text>
-                  <Text style={[styles.td, { flex: 1.6 }]}>{String(item[SCHEDULE_HEADERS.DATE] ?? "")}</Text>
-                  <Text style={[styles.td, { flex: 1.2 }]}>{String(item[SCHEDULE_HEADERS.WORKERS] ?? "")}</Text>
-                  <Text style={[styles.td, { flex: 2 }]}>{String(item[SCHEDULE_HEADERS.NOTE] ?? "")}</Text>
+
+              <View style={styles.table}>
+                <View style={styles.trHead}>
+                  <Text style={[styles.th, { flex: 0.6 }]}>차시</Text>
+                  <Text style={[styles.th, { flex: 1.6 }]}>날짜</Text>
+                  <Text style={[styles.th, { flex: 1.2 }]}>근무자</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>비고</Text>
                 </View>
-              ))}
-            </View>
+                {scheduleRows.map((item, idx) => (
+                  <View key={idx} style={styles.tr}>
+                    <Text style={[styles.td, { flex: 0.6 }]}>{String(item[SCHEDULE_HEADERS.SESSION] ?? "")}</Text>
+                    <Text style={[styles.td, { flex: 1.6 }]}>{String(item[SCHEDULE_HEADERS.DATE] ?? "")}</Text>
+                    <Text style={[styles.td, { flex: 1.2 }]}>{String(item[SCHEDULE_HEADERS.WORKERS] ?? "")}</Text>
+                    <Text style={[styles.td, { flex: 2 }]}>{String(item[SCHEDULE_HEADERS.NOTE] ?? "")}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
           )}
         </View>
 
@@ -831,7 +1009,7 @@ export default function ClassDetailScreen() {
       <Modal visible={scheduleModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalView, { width: '90%', maxHeight: '85%' }]}>
-            <Text style={styles.modalTitle}>새 일정 등록</Text>
+            <Text style={styles.modalTitle}>{isEditMode ? "일정 수정" : "새 일정 등록"}</Text>
             
             <ScrollView style={{ width: '100%' }} contentContainerStyle={{ paddingBottom: 20 }}>
               <Text style={styles.label}>날짜 선택: <Text style={{color:'#4F46E5', fontWeight:'bold'}}>{selectedDate || "(달력에서 선택)"}</Text></Text>
@@ -840,11 +1018,7 @@ export default function ClassDetailScreen() {
                 markedDates={{
                   [selectedDate]: {selected: true, disableTouchEvent: true, selectedColor: 'orange'}
                 }}
-                theme={{
-                  selectedDayBackgroundColor: '#4F46E5',
-                  todayTextColor: '#4F46E5',
-                  arrowColor: '#4F46E5',
-                }}
+                theme={{ selectedDayBackgroundColor: '#4F46E5', todayTextColor: '#4F46E5', arrowColor: '#4F46E5' }}
                 style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginBottom: 15 }}
               />
 
@@ -854,22 +1028,20 @@ export default function ClassDetailScreen() {
                   <TextInput 
                     style={[
                       styles.modalInput, 
-                      !scheduleSession && { fontStyle: 'italic' }
+                      isEditMode && { backgroundColor: '#E5E7EB', color: '#6B7280' }
                     ]}
                     placeholder="예: 1"
                     placeholderTextColor="#9CA3AF"
                     keyboardType="number-pad"
                     value={scheduleSession}
                     onChangeText={setScheduleSession}
+                    editable={!isEditMode} // 수정 모드에선 읽기 전용
                   />
                 </View>
                 <View style={{ flex: 1.5 }}>
                   <Text style={styles.label}>예정 근무자</Text>
                   <TextInput 
-                    style={[
-                      styles.modalInput, 
-                      !scheduleWorkers && { fontStyle: 'italic' }
-                    ]}
+                    style={[styles.modalInput, !scheduleWorkers && { fontStyle: 'italic' }]}
                     placeholder="이름 입력" 
                     placeholderTextColor="#9CA3AF"
                     value={scheduleWorkers}
@@ -881,11 +1053,8 @@ export default function ClassDetailScreen() {
               <View style={{ marginBottom: 10 }}>
                 <Text style={styles.label}>비고</Text>
                 <TextInput 
-                  style={[
-                    styles.modalInput,
-                    !scheduleNote && { fontStyle: 'italic' }
-                  ]}
-                  placeholder="예: 정기 수업, 보강, 클리닉, 직보 등"
+                  style={[styles.modalInput, !scheduleNote && { fontStyle: 'italic' }]}
+                  placeholder="예: 정기 수업, 보강 등"
                   placeholderTextColor="#9CA3AF"
                   value={scheduleNote}
                   onChangeText={setScheduleNote}
@@ -893,17 +1062,31 @@ export default function ClassDetailScreen() {
               </View>
 
               <Text style={{ fontSize: 12, color: '#666', marginTop: 5 }}>
-                • 수업: {classTitle}
+                • 수업: {classTitle} {isEditMode && "(차시는 수정할 수 없습니다)"}
               </Text>
             </ScrollView>
 
-            <View style={styles.modalBtnRow}>
-              <Pressable style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setScheduleModalVisible(false)}>
-                <Text style={styles.modalBtnTextCancel}>취소</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddSchedule}>
-                {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>등록</Text>}
-              </Pressable>
+            {/* 버튼 영역 */}
+            <View style={{ width: '100%', gap: 10 }}>
+              {/* 상단: 취소 / 확인 */}
+              <View style={styles.modalBtnRow}>
+                <Pressable style={[styles.modalBtn, styles.modalBtnCancel]} onPress={closeModal}>
+                  <Text style={styles.modalBtnTextCancel}>취소</Text>
+                </Pressable>
+                
+                <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddSchedule}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>{isEditMode ? "수정완료" : "등록"}</Text>}
+                </Pressable>
+              </View>
+
+              {isEditMode && (
+                <Pressable 
+                  style={[styles.modalBtn, { backgroundColor: '#FEE2E2', marginTop: 5 }]} 
+                  onPress={handleDeleteSchedule}
+                >
+                  <Text style={{ color: '#EF4444', fontWeight: '700' }}>이 일정 삭제하기</Text>
+                </Pressable>
+              )}
             </View>
           </View>
         </View>
@@ -959,4 +1142,20 @@ const styles = StyleSheet.create({
   tr: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#eee', paddingVertical: 12, alignItems: 'center' },
   th: { fontSize: 12, fontWeight: '700', color: '#555', textAlign: 'center' },
   td: { fontSize: 12, color: '#333', textAlign: 'center' },
+
+  scrollContainer: { marginBottom: 15 },
+  scheduleBox: { width: 200, height: 100, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 8, borderWidth: 1, padding: 6},
+
+  boxPast: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },     // 지난 수업 (회색)
+  boxNext: { backgroundColor: '#4F46E5', borderColor: '#4F46E5', elevation: 4, shadowColor: "#4F46E5", shadowOpacity: 0.3, shadowRadius: 4 }, // 다가오는 수업 (강조색)
+  boxFuture: { backgroundColor: '#FFFFFF', borderColor: '#D1D5DB' },    // 남은 수업 (흰색)
+
+  boxSessionText: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  boxDateText: { fontSize: 12, fontWeight: '500', marginBottom: 6 },
+  
+  textPast: { color: '#9CA3AF' },
+  textNext: { color: '#FFFFFF' },
+  textFuture: { color: '#374151' },
+
+  boxDetailText: { fontSize: 11, textAlign: 'center' },
 });
