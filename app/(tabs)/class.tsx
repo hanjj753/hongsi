@@ -1,14 +1,14 @@
 // [수업] 탭
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
 import { useFocusEffect } from "@react-navigation/native";
 
-// Utils (경로 ../../utils 로 유지)
+// Utils
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, CLASSES_HEADERS } from "../../config/sheetConfig";
+import { CSV_URLS, CLASSES_HEADERS, POSITIONS_HEADERS } from "../../config/sheetConfig";
 import { getActiveSession, ActiveSession } from "../../utils/activeSession";
 
 export default function ClassScreen() {
@@ -16,32 +16,40 @@ export default function ClassScreen() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [didAutoPick, setDidAutoPick] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState<string>("ALL");
 
-  // 화면 포커스 시 출근 상태 최신화
+  // 위치 정보 State
+  const [positions, setPositions] = useState<any[]>([]);
+  const [mapModalVisible, setMapModalVisible] = useState(false);
+
   useFocusEffect(useCallback(() => {
     (async () => { setActiveSession(await getActiveSession()); })();
   }, []));
 
   const load = useCallback(async () => {
-    setError(null);
     const tryFetch = async () => {
-      const data = await fetchSheetData(`${CSV_URLS.CLASSES}&t=${Date.now()}`);
-      return (data || []).filter((r) => r && String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() !== "");
+      const [cData, pData] = await Promise.all([
+        fetchSheetData(`${CSV_URLS.CLASSES}&t=${Date.now()}`),
+        fetchSheetData(CSV_URLS.POSITIONS)
+      ]);
+      return {
+        classes: (cData || []).filter((r:any) => r && String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() !== ""),
+        positions: pData || []
+      };
     };
+
     try {
-      let cleaned = await tryFetch();
-      if (cleaned.length === 0) {
+      let data = await tryFetch();
+      if (data.classes.length === 0) {
         await new Promise((res) => setTimeout(res, 600));
-        cleaned = await tryFetch();
+        data = await tryFetch();
       }
-      setRows(cleaned);
+      setRows(data.classes);
+      setPositions(data.positions);
     } catch (e: any) {
       setRows([]);
-      setError(e?.message ?? "수업 목록을 불러오지 못했습니다.");
     }
   }, []);
 
@@ -88,91 +96,214 @@ export default function ClassScreen() {
     return selectedQuarter === "ALL" ? rows : rows.filter((r) => String(r[CLASSES_HEADERS.QUARTER] ?? "").trim() === selectedQuarter);
   }, [rows, selectedQuarter]);
 
+  // 지도 앱 열기 핸들러
+  const openMap = (placeName: string, coordStr?: string) => {
+    let lat = "", lng = "";
+    
+    // 좌표 파싱
+    if (coordStr && coordStr.includes(",")) {
+      const parts = coordStr.split(",").map(s => s.trim());
+      if (parts.length === 2) {
+        lat = parts[0];
+        lng = parts[1];
+      }
+    }
+
+    // 1. 웹(Web) 환경
+    if (Platform.OS === 'web') {
+      // 좌표가 있으면 "위도,경도"를 검색어로, 없으면 "장소명"을 검색어로 사용
+      const query = (lat && lng) ? `${lat},${lng}` : placeName;
+      
+      // 네이버 지도 검색 URL (새 탭으로 열기)
+      const webUrl = `https://map.naver.com/v5/search/${encodeURIComponent(query)}`;
+      
+      window.open(webUrl, '_blank'); 
+      setMapModalVisible(false);
+      return;
+    }
+
+    // 2. 앱(App) 환경
+    let naverUrl = "";
+    let kakaoUrl = "";
+    let fallbackWebUrl = "";
+
+    if (lat && lng) {
+      // 좌표 모드
+      naverUrl = `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(placeName)}&appname=com.myapp`;
+      kakaoUrl = `kakaomap://look?p=${lat},${lng}`;
+      fallbackWebUrl = `https://map.naver.com/v5/search/${encodeURIComponent(lat + "," + lng)}`;
+    } else {
+      // 검색 모드
+      naverUrl = `nmap://search?query=${encodeURIComponent(placeName)}&appname=com.myapp`;
+      kakaoUrl = `kakaomap://search?q=${encodeURIComponent(placeName)}`;
+      fallbackWebUrl = `https://map.naver.com/v5/search/${encodeURIComponent(placeName)}`;
+    }
+
+    Linking.canOpenURL(naverUrl).then(supported => {
+      if (supported) {
+        Linking.openURL(naverUrl);
+      } else {
+        Linking.canOpenURL(kakaoUrl).then(kSupported => {
+          if (kSupported) {
+            Linking.openURL(kakaoUrl);
+          } else {
+            Linking.openURL(fallbackWebUrl);
+          }
+        });
+      }
+    });
+    setMapModalVisible(false);
+  };
+
   if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
 
   return (
-    <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-      <FontAwesome5 name="chalkboard" size={28} color="#333" />
-      <Text style={styles.title}>수업 목록</Text>
+    <View style={{ flex: 1 }}>
+      <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        
+        {/* 헤더 영역 */}
+        <View style={styles.headerRow}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <FontAwesome5 name="chalkboard" size={24} color="#333" />
+            <Text style={styles.title}>수업 목록</Text>
+          </View>
+          
+          <Pressable 
+            style={({pressed}) => [styles.mapBtn, pressed && { opacity: 0.7 }]} 
+            onPress={() => setMapModalVisible(true)}
+          >
+            <FontAwesome5 name="map-marked-alt" size={20} color="#4F46E5" />
+            <Text style={styles.mapBtnText}>위치 보기</Text>
+          </Pressable>
+        </View>
 
-      {/* 현재 출근 중 배너 */}
-      {activeSession && (
-        <Pressable style={styles.openShiftBanner} onPress={() => router.push({ pathname: "/class/[id]", params: { id: activeSession.classId } })}>
-          <Text style={styles.openShiftTitle}>현재 출근 중</Text>
-          <Text style={styles.openShiftText}>{activeSession.className} · {activeSession.startHm} 출근</Text>
-          <Text style={styles.openShiftHint}>눌러서 해당 수업으로 이동</Text>
-        </Pressable>
-      )}
+        {activeSession && (
+          <Pressable style={styles.openShiftBanner} onPress={() => router.push({ pathname: "/class/[id]", params: { id: activeSession.classId } })}>
+            <Text style={styles.openShiftTitle}>현재 출근 중</Text>
+            <Text style={styles.openShiftText}>{activeSession.className} · {activeSession.startHm} 출근</Text>
+            <Text style={styles.openShiftHint}>눌러서 해당 수업으로 이동</Text>
+          </Pressable>
+        )}
 
-      {/* 분기 필터 */}
-      <View style={styles.filterWrap}>
-        <Text style={styles.filterLabel}>분기</Text>
-
-        <View style={styles.pickerShell}>
-          <View style={styles.pickerInner}>
-            <Picker
-              selectedValue={selectedQuarter}
-              onValueChange={(val) => setSelectedQuarter(String(val))}
-              style={[styles.picker, Platform.OS === "web" && styles.pickerWeb]}
-              // ✅ 안드로이드 기본 화살표 숨김(커스텀 화살표만 남기기)
-              dropdownIconColor={Platform.OS === "android" ? "transparent" : "#6B7280"}
-              mode="dropdown"
-            >
-              {quarterOptions.map((q) => (
-                <Picker.Item key={q} label={q === "ALL" ? "전체" : q} value={q} />
-              ))}
-            </Picker>
-
-            {/* ✅ 커스텀 화살표: 웹/안드로이드만 표시 (iOS는 기본 UX가 달라서 보통 안 붙임) */}
-            {(Platform.OS === "web" || Platform.OS === "android") && (
-              <View pointerEvents="none" style={styles.pickerChevron}>
-                <FontAwesome5 name="chevron-down" size={14} color="#6B7280" />
-              </View>
-            )}
+        <View style={styles.filterWrap}>
+          <Text style={styles.filterLabel}>분기</Text>
+          <View style={styles.pickerShell}>
+            <View style={styles.pickerInner}>
+              <Picker
+                selectedValue={selectedQuarter}
+                onValueChange={(val) => setSelectedQuarter(String(val))}
+                style={[styles.picker, Platform.OS === "web" && styles.pickerWeb]}
+                dropdownIconColor={Platform.OS === "android" ? "transparent" : "#6B7280"}
+                mode="dropdown"
+              >
+                {quarterOptions.map((q) => (
+                  <Picker.Item key={q} label={q === "ALL" ? "전체" : q} value={q} />
+                ))}
+              </Picker>
+              {(Platform.OS === "web" || Platform.OS === "android") && (
+                <View pointerEvents="none" style={styles.pickerChevron}>
+                  <FontAwesome5 name="chevron-down" size={14} color="#6B7280" />
+                </View>
+              )}
+            </View>
           </View>
         </View>
-      </View>
 
+        {filteredRows.map((r, index) => {
+          const id = String(r[CLASSES_HEADERS.CLASS_ID] ?? "");
+          const school = String(r[CLASSES_HEADERS.SCHOOL] ?? "").trim();
+          const subject = String(r[CLASSES_HEADERS.SUBJECT] ?? "").trim();
+          const day = String(r[CLASSES_HEADERS.DAY] ?? "").trim();
+          const header = (school && subject) ? `${school} ${subject} ${day}` : (school || subject || "수업");
 
-      {/* 수업 카드 목록 */}
-      {filteredRows.map((r, index) => {
-        const id = String(r[CLASSES_HEADERS.CLASS_ID] ?? "");
-        
-        // ✅ [수정됨] CLASS_NAME 헤더 없이 학교 + 과목 조합
-        const school = String(r[CLASSES_HEADERS.SCHOOL] ?? "").trim();
-        const subject = String(r[CLASSES_HEADERS.SUBJECT] ?? "").trim();
-        const day = String(r[CLASSES_HEADERS.DAY] ?? "").trim();
-        const header = (school && subject) ? `${school} ${subject} ${day}` : (school || subject || "수업");
+          const place = String(r[CLASSES_HEADERS.PLACE] ?? "").trim();
+          const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();
+          const end = String(r[CLASSES_HEADERS.CLASS_END] ?? "").trim();
+          const quarter = String(r[CLASSES_HEADERS.QUARTER] ?? "").trim();
+          const workers = String(r[CLASSES_HEADERS.WORKERS] ?? "-").trim();
 
-        const place = String(r[CLASSES_HEADERS.PLACE] ?? "").trim();
-        const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();
-        const end = String(r[CLASSES_HEADERS.CLASS_END] ?? "").trim();
-        const quarter = String(r[CLASSES_HEADERS.QUARTER] ?? "").trim();
-        const workers = String(r[CLASSES_HEADERS.WORKERS] ?? "-").trim();
-
-        return (
-          <Pressable key={`${id}-${index}`} style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]} onPress={() => router.push({ pathname: "/class/[id]", params: { id } })}>
-            <View style={styles.accent} />
-            <View style={styles.cardBody}>
-              <Text style={styles.day}>{header}</Text>
-              {/* 메타 정보: 학교가 헤더에 있으므로 여기선 분기만 보여줘도 되지만, 명확성을 위해 같이 표시 */}
-              {(school || quarter) && <Text style={styles.meta}>{quarter}</Text>}
-              <View style={styles.lineRow}><Text style={styles.lineLabel}>장소</Text><Text style={styles.lineValue}>{place || "-"}</Text></View>
-              <View style={styles.lineRow}><Text style={styles.lineLabel}>시간</Text><Text style={styles.lineValue}>{start || end ? `${start} ~ ${end}` : "-"}</Text></View>
-              <View style={styles.lineRow}><Text style={styles.lineLabel}>근무자</Text><Text style={styles.lineValue}>{workers}</Text>
+          return (
+            <Pressable key={`${id}-${index}`} style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]} onPress={() => router.push({ pathname: "/class/[id]", params: { id } })}>
+              <View style={styles.accent} />
+              <View style={styles.cardBody}>
+                <Text style={styles.day}>{header}</Text>
+                {(school || quarter) && <Text style={styles.meta}>{quarter}</Text>}
+                <View style={styles.lineRow}><Text style={styles.lineLabel}>장소</Text><Text style={styles.lineValue}>{place || "-"}</Text></View>
+                <View style={styles.lineRow}><Text style={styles.lineLabel}>시간</Text><Text style={styles.lineValue}>{start || end ? `${start} ~ ${end}` : "-"}</Text></View>
+                <View style={styles.lineRow}><Text style={styles.lineLabel}>근무자</Text><Text style={styles.lineValue}>{workers}</Text>
+                </View>
               </View>
-            
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      {/* 지도 선택 모달 */}
+      <Modal visible={mapModalVisible} transparent animationType="fade" onRequestClose={() => setMapModalVisible(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setMapModalVisible(false)}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📍 강의실 위치 찾기</Text>
+              <Pressable onPress={() => setMapModalVisible(false)}>
+                <FontAwesome5 name="times" size={20} color="#999" />
+              </Pressable>
             </View>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+            
+            <Text style={styles.modalDesc}>선택하면 네이버/카카오맵으로 연결됩니다.</Text>
+
+            <ScrollView style={{ maxHeight: 400 }}>
+              {positions.length === 0 ? (
+                <Text style={styles.emptyText}>등록된 위치 정보가 없습니다.</Text>
+              ) : (
+                positions.map((pos, idx) => {
+                  const name = String(pos[POSITIONS_HEADERS.PLACE] || "");
+                  const coord = String(pos[POSITIONS_HEADERS.PLACE_LOCATION] || ""); 
+                  const note = String(pos[POSITIONS_HEADERS.NOTE] || ""); 
+
+                  if (!name) return null;
+                  
+                  // 표시할 텍스트 조합 (좌표 / 비고)
+                  let subText = coord;
+                  if (note) {
+                    subText = subText ? `${subText} / ${note}` : note;
+                  }
+
+                  return (
+                    <Pressable 
+                      key={idx} 
+                      style={({pressed}) => [styles.locationItem, pressed && {backgroundColor: '#F3F4F6'}]}
+                      onPress={() => openMap(name, coord)}
+                    >
+                      <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                        <FontAwesome5 name="map-marker-alt" size={16} color="#4F46E5" style={{marginRight: 10}} />
+                        <View>
+                          <Text style={styles.locationText}>{name}</Text>
+                          {!!subText && <Text style={{fontSize: 11, color: '#999'}}>{subText}</Text>}
+                        </View>
+                      </View>
+                      <FontAwesome5 name="chevron-right" size={12} color="#ccc" style={{marginLeft: 'auto'}} />
+                    </Pressable>
+                  )
+                })
+              )}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, paddingTop: 40, alignItems: "center", paddingBottom: 24, backgroundColor: "#F6F7FB" },
-  title: { fontSize: 18, marginVertical: 12, fontWeight: "700", color: "#111827" },
+  container: { flexGrow: 1, paddingTop: 20, alignItems: "center", paddingBottom: 24, backgroundColor: "#F6F7FB" },
+  
+  headerRow: { width: "92%", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: "800", color: "#111827" },
+  
+  mapBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EEF2FF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE' },
+  mapBtnText: { marginLeft: 6, color: '#4F46E5', fontWeight: '700', fontSize: 13 },
+
   filterWrap: { width: "92%", marginBottom: 10 },
   filterLabel: { fontSize: 12, color: "#6B7280", fontWeight: "700", marginBottom: 6 },
   pickerBox: { borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 12, overflow: "hidden", backgroundColor: "#fff" },
@@ -189,52 +320,18 @@ const styles = StyleSheet.create({
   openShiftText: { fontSize: 16, fontWeight: "800", color: "#111827" },
   openShiftHint: { marginTop: 6, fontSize: 12, color: "#6B7280" },
 
-  // 선택 상자 이쁘게
-  pickerShell: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
+  pickerShell: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E5E7EB" },
+  pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative" },
+  picker: { height: 44, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
+  pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingRight: 36 },
+  pickerChevron: { position: "absolute", right: 12, top: 0, height: 44, justifyContent: "center", alignItems: "center" },
 
-  pickerInner: {
-    borderRadius: 14,
-    overflow: "hidden",
-    position: "relative",
-  },
-
-  picker: {
-    height: 44,
-    width: "100%",
-    color: "#111827",
-    backgroundColor: "transparent",
-    // ✅ Picker(특히 웹 select)의 기본 테두리가 튀지 않게
-    borderWidth: 0,
-  },
-
-  // ✅ 웹에서 <select> 기본 검은 테두리/포커스 아웃라인/기본 화살표 제거
-  pickerWeb: {
-    outlineStyle: "none",
-    outlineWidth: 0,
-    borderWidth: 0,
-
-    // @ts-ignore (RN Web 전용 CSS)
-    appearance: "none",
-    // @ts-ignore
-    WebkitAppearance: "none",
-    // @ts-ignore
-    MozAppearance: "none",
-
-    paddingRight: 36, // 커스텀 화살표 공간 확보
-  },
-
-  pickerChevron: {
-    position: "absolute",
-    right: 12,
-    top: 0,
-    height: 44,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '85%', backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '60%', elevation: 5 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111' },
+  modalDesc: { fontSize: 13, color: '#666', marginBottom: 15 },
+  locationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f3f3f3' },
+  locationText: { fontSize: 15, color: '#333', fontWeight: '600' },
+  emptyText: { textAlign: 'center', color: '#999', marginTop: 20 },
 });

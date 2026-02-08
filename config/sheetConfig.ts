@@ -85,6 +85,7 @@ export const ATTENDANCE_LOG_HEADERS = {
 export const POSITIONS_HEADERS = {
   PLACE: "장소",
   PLACE_LOCATION: "좌표",
+  NOTE: "비고",
 };
 
 // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
