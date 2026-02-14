@@ -110,6 +110,9 @@ export default function ClassDetailScreen() {
   const [studentList, setStudentList] = useState<any[]>([]); // 불러온 학생 데이터 저장
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
 
+  const [smsReviewModalVisible, setSmsReviewModalVisible] = useState(false);
+  const [unsentMessages, setUnsentMessages] = useState<any[]>([]);
+
   const showAlert = (title: string, message: string) => {
     if (Platform.OS === 'web') {
       // 웹에서는 브라우저 기본 알림창 사용
@@ -579,114 +582,147 @@ export default function ClassDetailScreen() {
   };
 
   const handleDirectSms = async () => {
-    // 1. 안드로이드 필수 권한 요청 (SEND_SMS + READ_PHONE_STATE)
+    // 1. 안드로이드 필수 권한 요청
     if (Platform.OS === 'android') {
       try {
-        // 여러 권한을 한 번에 요청합니다.
         const granted = await PermissionsAndroid.requestMultiple([
           PermissionsAndroid.PERMISSIONS.SEND_SMS,
           PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
         ]);
-
         const smsGranted = granted[PermissionsAndroid.PERMISSIONS.SEND_SMS] === PermissionsAndroid.RESULTS.GRANTED;
-        const stateGranted = granted[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE] === PermissionsAndroid.RESULTS.GRANTED;
-
-        // READ_PHONE_STATE는 기기/버전에 따라 필수가 아닐 수도 있으므로, SEND_SMS만이라도 있으면 진행 시도
         if (!smsGranted) {
-          showAlert("권한 거부", "문자 발송 권한이 거부되었습니다.\n[설정] > [앱] 에서 권한을 허용해주세요.");
+          showAlert("권한 거부", "문자 발송 권한이 거부되었습니다.");
           return;
         }
       } catch (err) {
         console.warn(err);
-        showAlert("권한 오류", "권한을 요청하는 중 오류가 발생했습니다.");
         return;
       }
     }
 
+    // 2. 데이터 불러오기
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAMES.MESSAGE_LOG}`);
+      const data = await response.json();
+      
+      if (data.error) {
+        showAlert("오류", "시트 데이터를 가져오지 못했습니다.");
+        return;
+      }
+
+      // 'unsent' 상태이고 현재 수업(classId)인 메시지 필터링
+      const messages = data.filter((row: any) => {
+        const isUnsent = row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent";
+        const isSameClass = String(row[MESSAGE_LOG_HEADERS.CLASS_ID]) === String(targetId);
+        return isUnsent && isSameClass;
+      });
+
+      if (messages.length === 0) {
+        showAlert("알림", "이 수업에 발송 대기 중인(unsent) 메시지가 없습니다.");
+        return;
+      }
+
+      // 데이터 저장 및 검토 모달 열기
+      setUnsentMessages(messages);
+      setSmsReviewModalVisible(true);
+
+    } catch (error: any) {
+      console.error(error);
+      showAlert("오류", "데이터 로드 중 문제가 발생했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const processDirectSms = async () => {
+    setSmsReviewModalVisible(false); // 모달 닫기
+    setSaving(true); // 로딩 표시 시작
+
+    let sentCount = 0;
+    let failCount = 0;
+    let lastError = "";
+
+    try {
+      // 1. 문자 발송 루프
+      for (const msg of unsentMessages) {
+        const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE];
+        const content = msg[MESSAGE_LOG_HEADERS.CONTENT];
+
+        if (phone && content) {
+          const cleanPhone = String(phone).replace(/-/g, "");
+          try {
+            await DirectSms.sendDirectSms(cleanPhone, content);
+            sentCount++;
+          } catch (e: any) {
+            console.error("SMS 전송 실패:", phone, e);
+            failCount++;
+            lastError = e.message || String(e);
+          }
+        }
+        // 스팸 방지 딜레이
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+
+      // 2. 시트 상태 업데이트 (sent)
+      if (sentCount > 0) {
+        const updatePayload = {
+          sheetName: SHEET_NAMES.MESSAGE_LOG,
+          action: "update_status",
+          classId: targetId, 
+        };
+        
+        const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, updatePayload);
+
+        if (updateRes.ok) {
+            let resultMsg = `${sentCount}건 발송 성공.`;
+            if (failCount > 0) resultMsg += `\n(${failCount}건 실패)`;
+            showAlert("완료", resultMsg);
+        } else {
+            showAlert("주의", "문자는 보냈으나, 시트 상태 변경(sent)에 실패했습니다.");
+        }
+      } else {
+        showAlert("발송 실패", `전송 실패.\n오류: ${lastError}`);
+      }
+
+    } catch (error: any) {
+      console.error(error);
+      showAlert("오류", error.message || "알 수 없는 오류");
+    } finally {
+      setSaving(false);
+      setUnsentMessages([]); // 목록 초기화
+    }
+  };
+
+  const handleDeleteUnsentSms = () => {
     Alert.alert(
-      "문자 발송",
-      "현재 수업의 대기 중인(unsent) 메시지를 모두 발송하시겠습니까?",
+      "목록 삭제",
+      "현재 대기 중인 모든 메시지를 삭제하시겠습니까?\n(삭제 후에는 복구할 수 없습니다.)",
       [
         { text: "취소", style: "cancel" },
         {
-          text: "발송",
+          text: "삭제",
+          style: "destructive",
           onPress: async () => {
             setSaving(true);
             try {
-              // 1. 시트 데이터 가져오기
-              const response = await fetch(`${API_URLS.MESSAGE_LOG}?sheet=${SHEET_NAMES.MESSAGE_LOG}`);
-              const data = await response.json();
-              
-              if (data.error) {
-                showAlert("오류", "시트 데이터를 가져오지 못했습니다.");
-                return;
-              }
+              const payload = {
+                action: "delete_unsent_messages",
+                classId: targetId,
+              };
 
-              // 2. 필터링 (현재 수업 & unsent)
-              const unsentMessages = data.filter((row: any) => {
-                const isUnsent = row[MESSAGE_LOG_HEADERS.MESSAGE_STATUS] === "unsent";
-                const isSameClass = String(row[MESSAGE_LOG_HEADERS.CLASS_ID]) === String(targetId);
-                return isUnsent && isSameClass;
-              });
+              const res = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, payload);
 
-              if (unsentMessages.length === 0) {
-                showAlert("알림", "이 수업에 발송 대기 중인(unsent) 메시지가 없습니다.");
-                setSaving(false);
-                return;
-              }
-
-              let sentCount = 0;
-              let failCount = 0;
-              let lastError = "";
-
-              // 3. 문자 발송 루프
-              for (const msg of unsentMessages) {
-                const phone = msg[MESSAGE_LOG_HEADERS.PARENT_PHONE];
-                const content = msg[MESSAGE_LOG_HEADERS.CONTENT];
-
-                if (phone && content) {
-                  const cleanPhone = String(phone).replace(/-/g, "");
-                  try {
-                    // DirectSms 모듈 사용
-                    await DirectSms.sendDirectSms(cleanPhone, content);
-                    sentCount++;
-                  } catch (e: any) {
-                    console.error("SMS 전송 실패:", phone, e);
-                    failCount++;
-                    lastError = e.message || String(e);
-                    lastError = e.message || String(e);
-                    showAlert("발송 실패 (디버깅)", `번호: ${cleanPhone}\n에러내용: ${lastError}`);
-                  }
-                }
-                
-                // 안드로이드 스팸 차단 방지 딜레이 (1.5초)
-                await new Promise(resolve => setTimeout(resolve, 1500));
-              }
-
-              // 4. 상태 업데이트
-              if (sentCount > 0) {
-                const updatePayload = {
-                  sheetName: SHEET_NAMES.MESSAGE_LOG,
-                  action: "update_status",
-                  classId: targetId, 
-                };
-                
-                const updateRes = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, updatePayload);
-
-                if (updateRes.ok) {
-                   let resultMsg = `${sentCount}건 발송 성공.`;
-                   if (failCount > 0) resultMsg += `\n(${failCount}건 실패)`;
-                   showAlert("완료", resultMsg);
-                } else {
-                   showAlert("주의", "문자는 보냈으나, 시트 상태 변경(sent)에 실패했습니다.");
-                }
+              if (res.ok) {
+                showAlert("삭제 완료", `${res.count || unsentMessages.length}건의 메시지가 삭제되었습니다.`);
+                setSmsReviewModalVisible(false); // 모달 닫기
+                setUnsentMessages([]); // 목록 초기화
               } else {
-                showAlert("발송 실패", `모든 전송이 실패했습니다.\n(권한 문제일 가능성이 높습니다)\n오류 내용: ${lastError}`);
+                showAlert("삭제 실패", res.error || "삭제 중 문제가 발생했습니다.");
               }
-
-            } catch (error: any) {
-              console.error(error);
-              showAlert("오류 상세", error.message || "알 수 없는 오류");
+            } catch (e) {
+              console.error(e);
+              showAlert("오류", "요청 중 오류가 발생했습니다.");
             } finally {
               setSaving(false);
             }
@@ -993,6 +1029,7 @@ export default function ClassDetailScreen() {
           <TextInput 
             style={styles.input} 
             placeholder="공지 내용을 입력하세요" 
+            placeholderTextColor="#9CA3AF"
             multiline 
             numberOfLines={3} 
             value={noticeText} 
@@ -1023,6 +1060,7 @@ export default function ClassDetailScreen() {
             <TextInput 
               style={[styles.input, { flex: 1, minHeight: 40, marginBottom: 0, marginRight: 10 }]} 
               placeholder="차시 (예: 1)" 
+              placeholderTextColor="#9CA3AF"
               keyboardType="number-pad"
               value={sessionNum}
               onChangeText={setSessionNum}
@@ -1085,7 +1123,7 @@ export default function ClassDetailScreen() {
               </Text>
             </TouchableOpacity>
 
-            <View style={{ flex: 1, width: '100%', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee' }}>
+            <View style={{ width: '100%', height: '55%', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee' }}>
               <ScrollView>
                 {studentList.map(student => {
                   const isSelected = selectedStudentIds.has(student.id);
@@ -1205,6 +1243,60 @@ export default function ClassDetailScreen() {
                   <Text style={{ color: '#EF4444', fontWeight: '700' }}>이 일정 삭제하기</Text>
                 </Pressable>
               )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={smsReviewModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalView, { width: '90%', height: '70%' }]}>
+            <Text style={styles.modalTitle}>문자 발송 대기 목록</Text>
+            <Text style={[styles.desc, {textAlign: 'center'}]}>
+              총 {unsentMessages.length}건의 메시지가 대기 중입니다.
+            </Text>
+
+            <View style={{ flex: 1, width: '100%', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#eee', marginBottom: 15 }}>
+              <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+                {unsentMessages.map((msg, idx) => (
+                  <View key={idx} style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#f3f3f3' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontWeight: 'bold', color: '#333' }}>
+                        {msg[MESSAGE_LOG_HEADERS.STUDENT_NAME] || "이름없음"}
+                      </Text>
+                      <Text style={{ color: '#666', fontSize: 12 }}>
+                        {msg[MESSAGE_LOG_HEADERS.PARENT_PHONE]}
+                      </Text>
+                    </View>
+                    <Text style={{ color: '#444', fontSize: 13, lineHeight: 18 }}>
+                      {msg[MESSAGE_LOG_HEADERS.CONTENT]}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <Pressable 
+                style={[styles.modalBtn, styles.modalBtnCancel]} 
+                onPress={() => setSmsReviewModalVisible(false)}
+              >
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </Pressable>
+
+              <Pressable 
+                style={[styles.modalBtn, { backgroundColor: '#FEE2E2', marginHorizontal: 8 }]} 
+                onPress={handleDeleteUnsentSms}
+              >
+                <Text style={{ color: '#EF4444', fontWeight: '700' }}>전체 삭제</Text>
+              </Pressable>
+              
+              <Pressable 
+                style={[styles.modalBtn, { backgroundColor: '#3B82F6' }]} // 파란색
+                onPress={processDirectSms}
+              >
+                <Text style={styles.modalBtnTextConfirm}>전송 시작 ({unsentMessages.length}건)</Text>
+              </Pressable>
             </View>
           </View>
         </View>

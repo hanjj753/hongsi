@@ -97,10 +97,10 @@ export default function ClassScreen() {
   }, [rows, selectedQuarter]);
 
   // 지도 앱 열기 핸들러
-  const openMap = async (placeName: string, coordStr?: string) => {
+  const openMap = (placeName: string, coordStr?: string) => {
     let lat = "", lng = "";
     
-    // 좌표 파싱 (예: "37.123, 127.123")
+    // 좌표 파싱
     if (coordStr && coordStr.includes(",")) {
       const parts = coordStr.split(",").map(s => s.trim());
       if (parts.length === 2) {
@@ -109,12 +109,9 @@ export default function ClassScreen() {
       }
     }
 
-    // 1. 웹 (Web) 환경 -> 무조건 "검색 결과" 페이지로 이동 (새 탭)
+    // 1. 웹 (Web) 환경: 네이버 지도 검색 (한국에서는 네이버가 정확함)
     if (Platform.OS === 'web') {
-      // 좌표가 있으면 "위도,경도"를 검색어로, 없으면 "장소명"을 검색어로 사용
       const query = (lat && lng) ? `${lat},${lng}` : placeName;
-      
-      // 네이버 지도 PC 버전 검색 URL
       const webUrl = `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
       
       window.open(webUrl, '_blank'); 
@@ -122,51 +119,18 @@ export default function ClassScreen() {
       return;
     }
 
-    // 2. 앱 (App) 환경 -> 네이버 지도 앱 / 카카오맵 앱 실행 시도
-    const handleError = () => {
-        // 지도 앱이 하나도 없을 경우 웹 검색 결과로 이동 (Fallback)
-        const query = (lat && lng) ? `${lat},${lng}` : placeName;
-        Linking.openURL(`https://map.naver.com/p/search/${encodeURIComponent(query)}`);
-    };
+    // 2. 앱 (App) 환경: 구글 지도 사용
+    // Universal Link 방식을 사용하여 앱이 있으면 앱으로, 없으면 브라우저로 안전하게 연결됩니다.
+    // query에 "위도,경도"를 넣으면 해당 좌표에 핀이 찍히고, "장소명"을 넣으면 검색됩니다.
+    const query = (lat && lng) ? `${lat},${lng}` : placeName;
+    const googleUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 
-    try {
-      if (lat && lng) {
-        // [A] 좌표 있음 -> "핀(Pin)" 찍기 모드
-        const naverApp = `nmap://place?lat=${lat}&lng=${lng}&name=${encodeURIComponent(placeName)}&appname=com.myapp`;
-        const kakaoApp = `kakaomap://look?p=${lat},${lng}`;
-        
-        const canNaver = await Linking.canOpenURL(naverApp);
-        if (canNaver) {
-            await Linking.openURL(naverApp);
-        } else {
-            const canKakao = await Linking.canOpenURL(kakaoApp);
-            if (canKakao) {
-                await Linking.openURL(kakaoApp);
-            } else {
-                handleError(); // 둘 다 없으면 웹으로
-            }
-        }
-      } else {
-        // [B] 좌표 없음 -> "검색" 모드
-        const naverSearch = `nmap://search?query=${encodeURIComponent(placeName)}&appname=com.myapp`;
-        const kakaoSearch = `kakaomap://search?q=${encodeURIComponent(placeName)}`;
-
-        const canNaver = await Linking.canOpenURL(naverSearch);
-        if (canNaver) {
-            await Linking.openURL(naverSearch);
-        } else {
-            const canKakao = await Linking.canOpenURL(kakaoSearch);
-            if (canKakao) {
-                await Linking.openURL(kakaoSearch);
-            } else {
-                handleError(); // 둘 다 없으면 웹으로
-            }
-        }
-      }
-    } catch (e) {
-      console.warn(e);
-      handleError();
-    }
+    Linking.openURL(googleUrl).catch(err => {
+      console.error("Google Maps Open Error", err);
+      // 만약 구글 맵 연결도 실패하면 최후의 수단으로 네이버 웹 검색 결과로 이동
+      const fallbackUrl = `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
+      Linking.openURL(fallbackUrl);
+    });
     
     setMapModalVisible(false);
   };
