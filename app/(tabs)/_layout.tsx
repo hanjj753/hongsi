@@ -47,6 +47,13 @@ export default function TabLayout() {
           tabBarIcon: ({color, size}) => <Feather name="folder" size={size} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="inquiry" 
+        options={{
+          title: "문의",
+          tabBarIcon: ({ color }) => <FontAwesome5 name="question-circle" size={24} color={color} />,
+        }}
+      />
     </Tabs>
   );
 }
