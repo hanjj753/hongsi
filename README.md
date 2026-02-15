@@ -1,5 +1,13 @@
 # 김연주T 통합 웹/앱 개발
 
+## 초기 세팅 (읽을 필요x, 기록용)
+1. 아래 명령어들을 친다.
+```bash
+npx create-expo-app icon-generator
+cd icon-generator
+```
+2. `npx expo prebuild --platform android` 명령어를 친다.
+
 ## 실행을 위한 순서
 1. 컴퓨터에 Node.js를 설치한다. (https://nodejs.org/ko/download) (아래 쪽의 msi 파일)
 2. 아래 명령어를 powershell을 열어 시행해본다.
