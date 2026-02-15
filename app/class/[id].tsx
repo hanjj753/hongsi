@@ -43,7 +43,9 @@ const hmToMinutes = (hm: string) => {
 };
 const minutesToHm = (mins: number) => {
   const m = Math.max(0, Math.floor(mins));
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+  const hh = String(Math.floor(m / 60)).padStart(2, "0"); // 시(Hour) 0 채우기
+  const mm = String(m % 60).padStart(2, "0");             // 분(Minute) 0 채우기
+  return `${hh}:${mm}`;
 };
 const nowHm = () => {
   const d = new Date();
