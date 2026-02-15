@@ -553,7 +553,7 @@ export default function ClassDetailScreen() {
 
       await Promise.all(promises);
 
-      setIndividualMsg(`${session}차시 ${targets.length}명 전송 완료!`);
+      setIndividualMsg(`${session}차시 ${targets.length}명 추가 완료!`);
       setTimeout(() => setIndividualMsg(""), 3000); 
       setSessionNum(""); // 차시 초기화
 
