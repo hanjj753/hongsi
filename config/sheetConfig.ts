@@ -19,6 +19,8 @@ export const CSV_URLS = {
     // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
     PERMISSIONS : "REMOVED_PRIVATE_SHEET_URL",
 
+    // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [문의 관리]
+    INQUIRY : "REMOVED_PRIVATE_SHEET_URL",
   };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
@@ -167,4 +169,13 @@ export const SCHEDULE_HEADERS = {
     DATE: "날짜",
     WORKERS: "예정 근무자",
     NOTE: "비고",
+};
+
+export const INQUIRY_HEADERS = {
+  ID: "ID",
+  DATE: "날짜",
+  NAME: "이름",
+  EMAIL: "이메일",
+  CONTENT: "내용",
+  STATUS: "상태",
 };
