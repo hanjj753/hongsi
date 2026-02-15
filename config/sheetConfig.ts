@@ -30,7 +30,7 @@ export const API_URLS = {
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
     MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
 
-    // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리]
+    // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리] & [문의 관리]
     ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
 
 };
@@ -41,6 +41,7 @@ export const SHEET_NAMES = {
     MESSAGE_LOG: "메시지 log",
     ASSISTANT_INFO: "조교 정보",
     SCHEDULE: "전체_수업_일정",
+    INQUIRY: "문의 관리",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
