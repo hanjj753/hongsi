@@ -31,7 +31,7 @@ export default function LoginScreen() {
           // ⚠️ 여기서 에러가 나면 흰 화면이 됩니다. try-catch로 잡습니다.
           try {
             GoogleSignin.configure({
-              webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
+              webClientId: '804211566696-b1o5umsuod4jg1mfqmse44fegdfpp9hm.apps.googleusercontent.com', 
               scopes: ['https://www.googleapis.com/auth/drive.readonly'],
             });
           } catch (configError: any) {
