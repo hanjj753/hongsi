@@ -1,6 +1,6 @@
 // [수업] 탭
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking, TextInput, Alert } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
@@ -8,7 +8,9 @@ import { useFocusEffect } from "@react-navigation/native";
 
 // Utils
 import { fetchSheetData } from "../../utils/googleSheet_csv";
-import { CSV_URLS, CLASSES_HEADERS, POSITIONS_HEADERS } from "../../config/sheetConfig";
+import { postSheetData } from "../../utils/sheetApi";
+import { getCurrentUserEmail } from "../../utils/currentUser";
+import { CSV_URLS, API_URLS, SHEET_NAMES, CLASSES_HEADERS, POSITIONS_HEADERS, PERMISSION_HEADERS } from "../../config/sheetConfig";
 import { getActiveSession, ActiveSession } from "../../utils/activeSession";
 
 export default function ClassScreen() {
@@ -20,36 +22,49 @@ export default function ClassScreen() {
   const [didAutoPick, setDidAutoPick] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState<string>("ALL");
 
+  // 권한 및 관리 상태
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isManager, setIsManager] = useState(false);
+
   // 위치 정보 State
   const [positions, setPositions] = useState<any[]>([]);
   const [mapModalVisible, setMapModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editPlace, setEditPlace] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editNote, setEditNote] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useFocusEffect(useCallback(() => {
     (async () => { setActiveSession(await getActiveSession()); })();
   }, []));
 
   const load = useCallback(async () => {
-    const tryFetch = async () => {
-      const [cData, pData] = await Promise.all([
-        fetchSheetData(`${CSV_URLS.CLASSES}&t=${Date.now()}`),
-        fetchSheetData(CSV_URLS.POSITIONS)
-      ]);
-      return {
-        classes: (cData || []).filter((r:any) => r && String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() !== ""),
-        positions: pData || []
-      };
-    };
-
     try {
-      let data = await tryFetch();
-      if (data.classes.length === 0) {
-        await new Promise((res) => setTimeout(res, 600));
-        data = await tryFetch();
+      const [cData, pData, permData] = await Promise.all([
+        fetchSheetData(`${CSV_URLS.CLASSES}&t=${Date.now()}`),
+        fetchSheetData(`${CSV_URLS.POSITIONS}&t=${Date.now()}`),
+        fetchSheetData(CSV_URLS.PERMISSIONS)
+      ]);
+
+      setRows((cData || []).filter((r:any) => r && String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() !== ""));
+      setPositions(pData || []);
+
+      // 권한 체크
+      const myEmail = getCurrentUserEmail();
+      if (myEmail && Array.isArray(permData)) {
+        const myRecord = permData.find((r: any) => 
+          String(r[PERMISSION_HEADERS.EMAIL] || "").trim().toLowerCase() === myEmail.trim().toLowerCase()
+        );
+        if (myRecord) {
+          const role = String(myRecord[PERMISSION_HEADERS.ROLE] || "").trim();
+          if (role === 'Admin') setIsAdmin(true);
+          if (role === 'Manager') setIsManager(true);
+        }
       }
-      setRows(data.classes);
-      setPositions(data.positions);
     } catch (e: any) {
-      setRows([]);
+      console.error(e);
     }
   }, []);
 
@@ -60,6 +75,103 @@ export default function ClassScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try { await load(); setActiveSession(await getActiveSession()); } finally { setRefreshing(false); }
+  };
+
+  const showAlert = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      // 웹에서는 브라우저 기본 알림창 사용
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      // 앱에서는 기존 Alert 사용
+      Alert.alert(title, message);
+    }
+  };
+
+  // 장소 저장 (추가/수정) 핸들러
+  const handleSaveLocation = async () => {
+    if (!editPlace.trim() || !editLocation.trim()) {
+      showAlert("알림", "장소명과 좌표를 입력해주세요.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const action = isEditMode ? "update_location" : "add_location";
+      const payload = {
+        action,
+        place: editPlace.trim(),
+        location: editLocation.trim(),
+        note: editNote.trim()
+      };
+
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.POSITIONS, payload);
+
+      if (res.ok) {
+        showAlert("성공", isEditMode ? "수정되었습니다." : "추가되었습니다."); 
+        setEditModalVisible(false);
+        load();
+      } else {
+        showAlert("실패", res.error || "문제가 발생했습니다."); 
+      }
+    } catch (e) {
+      console.error(e);
+      showAlert("오류", "전송 중 문제가 발생했습니다."); 
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 장소 삭제 핸들러
+  const handleDeleteLocation = (placeName: string) => {
+    const processDelete = async () => {
+      setSaving(true);
+      try {
+        const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.POSITIONS, {
+          action: "delete_location",
+          place: placeName
+        });
+        if (res.ok) {
+          showAlert("완료", "삭제되었습니다.");
+          setEditModalVisible(false); // 삭제 성공 시 수정 모달 닫기
+          load(); // 데이터 새로고침
+        } else {
+          showAlert("실패", res.error || "문제가 발생했습니다.");
+        }
+      } catch (e) { 
+        console.error(e);
+        showAlert("오류", "삭제 중 오류가 발생했습니다.");
+      } finally { 
+        setSaving(false); 
+      }
+    };
+
+    // 웹 환경을 위한 confirm 처리
+    if (Platform.OS === 'web') {
+      if (window.confirm(`[${placeName}] 장소를 삭제하시겠습니까?`)) {
+        processDelete();
+      }
+    } else {
+      Alert.alert("삭제 확인", `[${placeName}] 장소를 삭제하시겠습니까?`, [
+        { text: "취소", style: "cancel" },
+        { text: "삭제", style: "destructive", onPress: processDelete }
+      ]);
+    }
+  };
+
+  // 수정 모달 열기
+  const openEditModal = (item?: any) => {
+    if (item) {
+      setIsEditMode(true);
+      setEditPlace(String(item[POSITIONS_HEADERS.PLACE] || ""));
+      setEditLocation(String(item[POSITIONS_HEADERS.PLACE_LOCATION] || ""));
+      setEditNote(String(item[POSITIONS_HEADERS.NOTE] || ""));
+    } else {
+      setIsEditMode(false);
+      setEditPlace("");
+      setEditLocation("");
+      setEditNote("");
+    }
+    setEditModalVisible(true);
   };
 
   const quarterOptions = useMemo(() => {
@@ -212,57 +324,86 @@ export default function ClassScreen() {
         })}
       </ScrollView>
 
-      {/* 지도 선택 모달 */}
       <Modal visible={mapModalVisible} transparent animationType="fade" onRequestClose={() => setMapModalVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setMapModalVisible(false)}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>📍 강의실 위치 찾기</Text>
-              <Pressable onPress={() => setMapModalVisible(false)}>
-                <FontAwesome5 name="times" size={20} color="#999" />
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 15 }}>
+                {(isAdmin || isManager) && (
+                  <Pressable onPress={() => openEditModal()}>
+                    <FontAwesome5 name="plus" size={18} color="#4F46E5" />
+                  </Pressable>
+                )}
+                <Pressable onPress={() => setMapModalVisible(false)}>
+                  <FontAwesome5 name="times" size={20} color="#999" />
+                </Pressable>
+              </View>
             </View>
-            
-            <Text style={styles.modalDesc}>선택하면 네이버/카카오맵으로 연결됩니다.</Text>
-
+            <Text style={styles.modalDesc}>선택하면 지도로 연결됩니다. {(isAdmin || isManager) && "수정은 아이콘을 누르세요."}</Text>
             <ScrollView style={{ maxHeight: 400 }}>
-              {positions.length === 0 ? (
-                <Text style={styles.emptyText}>등록된 위치 정보가 없습니다.</Text>
-              ) : (
+              {positions.length === 0 ? <Text style={styles.emptyText}>등록된 위치 정보가 없습니다.</Text> :
                 positions.map((pos, idx) => {
                   const name = String(pos[POSITIONS_HEADERS.PLACE] || "");
                   const coord = String(pos[POSITIONS_HEADERS.PLACE_LOCATION] || ""); 
                   const note = String(pos[POSITIONS_HEADERS.NOTE] || ""); 
-
                   if (!name) return null;
-                  
-                  // 표시할 텍스트 조합 (좌표 / 비고)
-                  let subText = coord;
-                  if (note) {
-                    subText = subText ? `${subText} / ${note}` : note;
-                  }
-
                   return (
-                    <Pressable 
-                      key={idx} 
-                      style={({pressed}) => [styles.locationItem, pressed && {backgroundColor: '#F3F4F6'}]}
-                      onPress={() => openMap(name, coord)}
-                    >
-                      <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                    <View key={idx} style={styles.locationItemRow}>
+                      <Pressable style={({pressed}) => [styles.locationItemLeft, pressed && {backgroundColor: '#F3F4F6'}]} onPress={() => openMap(name, coord)}>
                         <FontAwesome5 name="map-marker-alt" size={16} color="#4F46E5" style={{marginRight: 10}} />
-                        <View>
+                        <View style={{ flex: 1 }}>
                           <Text style={styles.locationText}>{name}</Text>
-                          {!!subText && <Text style={{fontSize: 11, color: '#999'}}>{subText}</Text>}
+                          <Text style={{fontSize: 11, color: '#999'}}>{coord} {note ? `/ ${note}` : ""}</Text>
                         </View>
-                      </View>
-                      <FontAwesome5 name="chevron-right" size={12} color="#ccc" style={{marginLeft: 'auto'}} />
-                    </Pressable>
+                      </Pressable>
+                      {(isAdmin || isManager) && (
+                        <Pressable onPress={() => openEditModal(pos)} style={{ padding: 10 }}>
+                          <FontAwesome5 name="edit" size={16} color="#9CA3AF" />
+                        </Pressable>
+                      )}
+                    </View>
                   )
                 })
-              )}
+              }
             </ScrollView>
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal visible={editModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
+            <Text style={styles.modalTitle}>{isEditMode ? "장소 정보 수정" : "새 장소 추가"}</Text>
+            
+            <Text style={styles.editLabel}>장소명 (식별자)</Text>
+            <TextInput 
+              style={[styles.editInput, isEditMode && styles.readOnlyInput]} 
+              value={editPlace} onChangeText={setEditPlace} editable={!isEditMode} placeholder="예: 상아 본관" placeholderTextColor="#9CA3AF"
+            />
+            
+            <Text style={styles.editLabel}>좌표 (위도, 경도)</Text>
+            <TextInput style={styles.editInput} value={editLocation} onChangeText={setEditLocation} placeholder="37.123, 127.123" placeholderTextColor="#9CA3AF"/>
+            
+            <Text style={styles.editLabel}>비고</Text>
+            <TextInput style={styles.editInput} value={editNote} onChangeText={setEditNote} placeholder="예: 3층" placeholderTextColor="#9CA3AF"/>
+
+            <View style={styles.modalBtnRow}>
+              <Pressable style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}>
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleSaveLocation}>
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnTextConfirm}>저장</Text>}
+              </Pressable>
+            </View>
+
+            {isEditMode && (
+              <Pressable onPress={() => handleDeleteLocation(editPlace)} style={{ marginTop: 15, alignSelf: 'center' }}>
+                <Text style={{ color: '#EF4444', fontWeight: '700' }}>이 장소 삭제하기</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
       </Modal>
 
     </View>
@@ -308,4 +449,16 @@ const styles = StyleSheet.create({
   locationItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f3f3f3' },
   locationText: { fontSize: 15, color: '#333', fontWeight: '600' },
   emptyText: { textAlign: 'center', color: '#999', marginTop: 20 },
+
+  locationItemRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f3f3f3' },
+  locationItemLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  editLabel: { fontSize: 13, fontWeight: '700', color: '#374151', marginTop: 15, marginBottom: 5 },
+  editInput: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 12, fontSize: 15, backgroundColor: '#F9FAFB' },
+  readOnlyInput: { backgroundColor: '#E5E7EB', color: '#6B7280' },
+  modalBtnRow: { flexDirection: "row", gap: 10, width: "100%", marginTop: 20 },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
+  modalBtnCancel: { backgroundColor: "#E5E7EB" },
+  modalBtnConfirm: { backgroundColor: "#4F46E5" },
+  modalBtnTextCancel: { color: "#374151", fontWeight: "700" },
+  modalBtnTextConfirm: { color: "white", fontWeight: "700" },
 });

@@ -44,6 +44,7 @@ export const SHEET_NAMES = {
     ASSISTANT_INFO: "조교 정보",
     SCHEDULE: "전체_수업_일정",
     INQUIRY: "문의 관리",
+    POSITIONS : "수업_장소들",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
