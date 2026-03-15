@@ -57,8 +57,8 @@ export default function InquiryScreen() {
               const role = String(myPerm[PERMISSION_HEADERS.ROLE] || "");
               if (role === 'Admin' || role === 'Manager') {
                 setUserRole(role); 
-                fetchInquiries(); 
               }
+              fetchInquiries(); 
             }
           }
 
@@ -87,7 +87,7 @@ export default function InquiryScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (userRole) await fetchInquiries(); 
+    await fetchInquiries(); 
     setRefreshing(false);
   }, [userRole]);
 
@@ -118,7 +118,7 @@ export default function InquiryScreen() {
       if (res.ok) {
         showAlert("접수 완료", "문의 내용이 성공적으로 접수되었습니다.");
         setContent(""); 
-        if (userRole) fetchInquiries();
+        fetchInquiries();
       } else {
         showAlert("전송 실패", res.error || "알 수 없는 오류가 발생했습니다.");
       }
@@ -186,6 +186,14 @@ export default function InquiryScreen() {
     });
   }, [inquiryList, filterStatus]);
 
+  const myInquiryList = useMemo(() => {
+    return inquiryList.filter(item => {
+      // 혹시 config에 이메일 헤더가 어떻게 되어있을지 몰라 안전하게 여러 키워드 탐색
+      const rowEmail = String(item[INQUIRY_HEADERS.EMAIL] || item["이메일"] || item["Email"] || "").trim();
+      return rowEmail.toLowerCase() === userEmail.toLowerCase();
+    });
+  }, [inquiryList, userEmail]);
+
   return (
     <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <View style={styles.headerRow}>
@@ -224,6 +232,30 @@ export default function InquiryScreen() {
         >
           {sending ? <ActivityIndicator color="white" /> : <Text style={styles.submitBtnText}>문의 접수</Text>}
         </Pressable>
+      </View>
+
+      <View style={{ marginTop: 10, marginBottom: userRole ? 10 : 40 }}>
+        <Text style={[styles.managerTitle, { marginBottom: 12 }]}>내 문의 내역</Text>
+        {myInquiryList.length === 0 ? (
+          <Text style={{ textAlign: 'center', color: '#999', marginVertical: 20 }}>등록한 문의가 없습니다.</Text>
+        ) : (
+          myInquiryList.map((item, idx) => {
+            const isSolved = String(item[INQUIRY_HEADERS.STATUS] || "").trim() === "O";
+            return (
+              <View key={`my-${idx}`} style={[styles.inquiryItem, isSolved && { opacity: 0.6, backgroundColor: '#F3F4F6' }]}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={styles.inquiryDate}>{String(item[INQUIRY_HEADERS.DATE] || "").slice(5, 16)}</Text>
+                  <Text style={[styles.inquiryContent, { marginTop: 4 }]}>{item[INQUIRY_HEADERS.CONTENT]}</Text>
+                </View>
+                <View style={[styles.statusBadge, isSolved ? styles.statusO : styles.statusX]}>
+                  <Text style={[styles.statusText, isSolved ? {color:'#065F46'} : {color:'#991B1B'}]}>
+                    {isSolved ? "해결됨" : "접수됨"}
+                  </Text>
+                </View>
+              </View>
+            );
+          })
+        )}
       </View>
 
       {(userRole === 'Admin' || userRole === 'Manager') && (
