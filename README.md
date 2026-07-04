@@ -1,5 +1,13 @@
 # 김연주T 통합 웹/앱 개발
 
+## 초기 세팅 (읽을 필요x, 기록용)
+1. 아래 명령어들을 친다.
+```bash
+npx create-expo-app icon-generator
+cd icon-generator
+```
+2. `npx expo prebuild --platform android` 명령어를 친다.
+
 ## 실행을 위한 순서
 1. 컴퓨터에 Node.js를 설치한다. (https://nodejs.org/ko/download) (아래 쪽의 msi 파일)
 2. 아래 명령어를 powershell을 열어 시행해본다.
@@ -88,4 +96,20 @@ import { FontAwesome } from '@expo/vector-icons';
 5. Apps Script의 코드에 변화가 있다면 [새 배포]를 해주어야 한다.
 
 ### 구글 로그인 웹 클라이언트 ID
-- 804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com
+- 804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com (앱)
+- client_secret_804211566696-b1o5umsuod4jg1mfqmse44fegdfpp9hm.apps.googleusercontent.com.json 확인 (웹)
+
+## 앱 아이콘 변경하기
+1. 아래 명령어로 임시 프로젝트를 만든다.
+```bash
+# 바탕화면이나 편한 곳에서
+npx create-expo-app icon-generator
+cd icon-generator
+```
+2. icon-generator/assets 폴더에 바꾸고 싶은 icon.png와 adaptive-icon.png를 덮어씌운다.
+3. 아래 명령어를 치고, android/app/src/main/res 폴더의 `mipmap-`로 시작하는 아래 5개 폴더를 복사한다. 
+```bash
+npx expo prebuild --platform android
+```
+- 폴더 : `mipmap-hdpi` `mipmap-mdpi` `mipmap-xhdpi` `mipmap-xxhdpi` `mipmap-xxxhdpi`
+4. 원래 프로젝트의 파일들을 교체한다.

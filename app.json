@@ -17,8 +17,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.hongsi.assistant",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "조교 출석 체크를 위해 현재 위치 정보를 사용합니다."
-      }
+        "NSLocationWhenInUseUsageDescription": "조교 출석 체크를 위해 현재 위치 정보를 사용합니다.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "googleServicesFile" : "./GoogleService-Info.plist",
     },
     "android": {
       "adaptiveIcon": {

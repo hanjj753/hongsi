@@ -19,6 +19,8 @@ export const CSV_URLS = {
     // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
     PERMISSIONS : "REMOVED_PRIVATE_SHEET_URL",
 
+    // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [문의 관리]
+    INQUIRY : "REMOVED_PRIVATE_SHEET_URL",
   };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
@@ -30,7 +32,7 @@ export const API_URLS = {
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
     MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
 
-    // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리]
+    // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리] & [문의 관리]
     ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
 
 };
@@ -41,6 +43,8 @@ export const SHEET_NAMES = {
     MESSAGE_LOG: "메시지 log",
     ASSISTANT_INFO: "조교 정보",
     SCHEDULE: "전체_수업_일정",
+    INQUIRY: "문의 관리",
+    POSITIONS : "수업_장소들",
 };
 
 // 아래는 각 시트에서 헤더를 변경 시에 수정해야 하는 부분입니다.
@@ -166,4 +170,13 @@ export const SCHEDULE_HEADERS = {
     DATE: "날짜",
     WORKERS: "예정 근무자",
     NOTE: "비고",
+};
+
+export const INQUIRY_HEADERS = {
+  ID: "ID",
+  DATE: "날짜",
+  NAME: "이름",
+  EMAIL: "이메일",
+  CONTENT: "내용",
+  STATUS: "상태",
 };
