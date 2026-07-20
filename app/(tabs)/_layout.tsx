@@ -2,7 +2,6 @@ import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import AntDesign from '@expo/vector-icons/AntDesign';
-import Feather from '@expo/vector-icons/Feather';
 
 export default function TabLayout() {
   return (
@@ -39,12 +38,10 @@ export default function TabLayout() {
           tabBarIcon: ({color, size}) => <Ionicons name="people-outline" size={size} color={color} />,
         }}
       />
-      {/* 5. 파일 탭 */}
       <Tabs.Screen
         name="files"
         options={{
-          title: '파일',
-          tabBarIcon: ({color, size}) => <Feather name="folder" size={size} color={color} />,
+          href: null,
         }}
       />
       <Tabs.Screen

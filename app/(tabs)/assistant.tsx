@@ -1,6 +1,6 @@
 // [조교] 탭
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert, Modal, Platform, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert, Modal, Platform, TextInput, KeyboardAvoidingView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from '@react-native-picker/picker';
 
@@ -22,18 +22,64 @@ type Assistant = {
   roles: string[]; 
   status: string;
   startDate: string;
+  account: string;
   isInactive: boolean;
+};
+
+type AssistantForm = {
+  position: string;
+  name: string;
+  phone: string;
+  email: string;
+  role: string;
+  startDate: string;
+  account: string;
+  status: string;
+};
+
+const EMPTY_ASSISTANT: AssistantForm = {
+  position: "조교",
+  name: "",
+  phone: "",
+  email: "",
+  role: "현장",
+  startDate: "",
+  account: "",
+  status: "현역",
 };
 
 type WorkRow = {
   date: string;
   shift: string;
+  day: string;
   start: string;
   end: string;
   work: string;
   email: string;
   _dt?: Date;
 };
+
+function todayYmd(): string {
+  const dt = new Date();
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function isValidYmd(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const dt = new Date(year, month - 1, day);
+  return dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day;
+}
+
+function isValidHm(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function koreanDay(value: string): string {
+  if (!isValidYmd(value)) return "";
+  const [year, month, day] = value.split('-').map(Number);
+  return ['일', '월', '화', '수', '목', '금', '토'][new Date(year, month - 1, day).getDay()];
+}
 
 function parseSheetDate(dateStr: string): Date | null {
   const cleaned = String(dateStr || "").replace(/[\s\.]/g, "-").replace(/-+/g, "-"); 
@@ -60,6 +106,26 @@ function secondsToHMS(totalSec: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+const AssistantInput = ({ label, value, onChange, keyboardType = 'default' }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  keyboardType?: 'default' | 'email-address' | 'phone-pad';
+}) => (
+  <View style={{ marginBottom: 10 }}>
+    <Text style={styles.editLabel}>{label}</Text>
+    <TextInput
+      style={styles.editInput}
+      value={value}
+      onChangeText={onChange}
+      keyboardType={keyboardType}
+      placeholder={label}
+      placeholderTextColor="#9CA3AF"
+      autoCapitalize={keyboardType === 'email-address' ? 'none' : 'sentences'}
+    />
+  </View>
+);
+
 export default function AssistantScreen() {
   const [allData, setAllData] = useState<Assistant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,15 +141,23 @@ export default function AssistantScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isManager, setIsManager] = useState(false);
 
+  const [assistantModalVisible, setAssistantModalVisible] = useState(false);
+  const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
+  const [assistantForm, setAssistantForm] = useState<AssistantForm>(EMPTY_ASSISTANT);
+  const [savingAssistant, setSavingAssistant] = useState(false);
+
   // ✅ 근무 기록 모달 상태
   const [logModalVisible, setLogModalVisible] = useState(false);
   const [targetName, setTargetName] = useState("");
+  const [targetEmail, setTargetEmail] = useState("");
   const [logRows, setLogRows] = useState<WorkRow[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
 
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingLog, setEditingLog] = useState<WorkRow | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editShift, setEditShift] = useState("");
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
@@ -93,6 +167,103 @@ export default function AssistantScreen() {
       window.alert(`${title}\n\n${message}`);
     } else {
       Alert.alert(title, message);
+    }
+  };
+
+  const assistantFromForm = (form: AssistantForm): Assistant => {
+    const position = form.position.trim();
+    const role = form.role.trim();
+    const status = form.status.trim();
+    return {
+      name: form.name.trim(),
+      rawPosition: position,
+      positions: position.split(',').map(value => value.trim()).filter(Boolean),
+      phone: form.phone.trim(),
+      email: form.email.trim().toLowerCase(),
+      roles: role.split(',').map(value => value.trim()).filter(Boolean),
+      status,
+      startDate: form.startDate.trim(),
+      account: form.account.trim(),
+      isInactive: status.includes("비근무"),
+    };
+  };
+
+  const openAddAssistantModal = () => {
+    if (!isAdmin && !isManager) return;
+    setEditingAssistant(null);
+    setAssistantForm({ ...EMPTY_ASSISTANT });
+    setAssistantModalVisible(true);
+  };
+
+  const openEditAssistantModal = (assistant: Assistant) => {
+    if (!isAdmin && !isManager) return;
+    setEditingAssistant(assistant);
+    setAssistantForm({
+      position: assistant.rawPosition,
+      name: assistant.name,
+      phone: assistant.phone,
+      email: assistant.email,
+      role: assistant.roles.join(', '),
+      startDate: assistant.startDate,
+      account: assistant.account,
+      status: assistant.status,
+    });
+    setAssistantModalVisible(true);
+  };
+
+  const updateAssistantForm = (key: keyof AssistantForm, value: string) => {
+    setAssistantForm(current => ({ ...current, [key]: value }));
+  };
+
+  const handleSaveAssistant = async () => {
+    const normalized = assistantFromForm(assistantForm);
+    if (!normalized.name || !normalized.email) {
+      showAlert("입력 확인", "이름과 Gmail은 필수입니다.");
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(normalized.email)) {
+      showAlert("입력 확인", "올바른 이메일 주소를 입력해주세요.");
+      return;
+    }
+
+    const duplicate = allData.find(item =>
+      item !== editingAssistant && item.email.trim().toLowerCase() === normalized.email
+    );
+    if (duplicate) {
+      showAlert("이메일 중복", "같은 이메일로 등록된 조교가 이미 있습니다.");
+      return;
+    }
+
+    setSavingAssistant(true);
+    try {
+      const payload = {
+        action: editingAssistant ? "update_assistant" : "add_assistant",
+        originalEmail: editingAssistant?.email || "",
+        position: normalized.rawPosition,
+        name: normalized.name,
+        phone: normalized.phone,
+        email: normalized.email,
+        role: normalized.roles.join(', '),
+        startDate: normalized.startDate,
+        account: normalized.account,
+        status: normalized.status,
+      };
+      const res = await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.ASSISTANT_INFO, payload);
+      if (!res.ok) {
+        showAlert("저장 실패", res.error || "조교 정보를 저장하지 못했습니다.");
+        return;
+      }
+
+      setAllData(current => editingAssistant
+        ? current.map(item => item === editingAssistant ? normalized : item)
+        : [...current, normalized]);
+      setAssistantModalVisible(false);
+      showAlert("완료", editingAssistant ? "조교 정보가 수정되었습니다." : "조교 정보가 추가되었습니다.");
+    } catch (error) {
+      console.error(error);
+      showAlert("오류", "조교 정보 저장 중 문제가 발생했습니다.");
+    } finally {
+      setSavingAssistant(false);
     }
   };
 
@@ -116,61 +287,159 @@ export default function AssistantScreen() {
   };
 
   const openEditModal = (log: WorkRow) => {
-    if (!isAdmin && !isManager) return; 
+    if (!isAdmin && !isManager) return;
     setEditingLog(log);
+    setEditDate(log.date);
+    setEditShift(log.shift);
     setEditStart(log.start);
     setEditEnd(log.end || log.start);
     setEditModalVisible(true);
   };
 
-  // [수정] 근무 기록 수정 및 저장 핸들러
-  const handleSaveEdit = async () => {
-    if (!editingLog) return;
+  const openAddModal = () => {
+    if (!isAdmin && !isManager) return;
+    setEditingLog(null);
+    setEditDate(todayYmd());
+    setEditShift("");
+    setEditStart("");
+    setEditEnd("");
+    setEditModalVisible(true);
+  };
 
-    const newDuration = calculateDuration(editStart, editEnd);
+  // 근무 기록 추가 및 수정
+  const handleSaveEdit = async () => {
+    const normalizedDate = editDate.trim();
+    const normalizedShift = editShift.trim();
+    const normalizedStart = editStart.trim();
+    const normalizedEnd = editEnd.trim();
+
+    if (!isValidYmd(normalizedDate)) {
+      showAlert("입력 확인", "날짜를 YYYY-MM-DD 형식으로 입력해주세요.");
+      return;
+    }
+    if (!normalizedShift) {
+      showAlert("입력 확인", "수업 또는 근무명을 입력해주세요.");
+      return;
+    }
+    if (!isValidHm(normalizedStart) || !isValidHm(normalizedEnd)) {
+      showAlert("입력 확인", "출퇴근 시간을 HH:MM 형식으로 입력해주세요.");
+      return;
+    }
+
+    const newDuration = calculateDuration(normalizedStart, normalizedEnd);
     setSavingEdit(true);
 
     try {
-      const payload = {
+      const payload = editingLog ? {
         action: "update_attendance_log",
         targetDate: editingLog.date,
         targetEmail: editingLog.email,
         targetClass: editingLog.shift,
         oldStart: editingLog.start,
         oldEnd: editingLog.end || "",
-        newStart: editStart,
-        newEnd: editEnd,
-        newDuration: newDuration
+        newStart: normalizedStart,
+        newEnd: normalizedEnd,
+        newDuration
+      } : {
+        action: "add_attendance_log",
+        record: {
+          [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: normalizedDate,
+          [ATTENDANCE_LOG_HEADERS.CLASS_ID]: "",
+          [ATTENDANCE_LOG_HEADERS.QUARTER]: "",
+          [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: normalizedShift,
+          [ATTENDANCE_LOG_HEADERS.DAY]: koreanDay(normalizedDate),
+          [ATTENDANCE_LOG_HEADERS.WORKERS]: targetName,
+          [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: targetEmail,
+          [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: normalizedStart,
+          [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: normalizedEnd,
+          "근무 시간": newDuration,
+          [ATTENDANCE_LOG_HEADERS.STATUS]: "퇴근",
+          [ATTENDANCE_LOG_HEADERS.WORKER_LOCATION]: "",
+          [ATTENDANCE_LOG_HEADERS.NOTE]: "관리자 직접 추가"
+        }
       };
-
-      console.log(payload);
 
       const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
 
       if (res.ok) {
-        showAlert("성공", "근무 기록이 수정되었습니다.");
-        
-        setLogRows(prev => prev.map(row => {
-          if (row === editingLog) {
-            return { 
-              ...row, 
-              start: editStart, 
-              end: editEnd, 
-              work: newDuration 
-            };
+        if (editingLog) {
+          setLogRows(prev => prev.map(log => log === editingLog ? {
+            ...log,
+            start: normalizedStart,
+            end: normalizedEnd,
+            work: newDuration
+          } : log));
+          showAlert("완료", "근무 기록이 수정되었습니다.");
+        } else {
+          if (res.data?.alreadyExists) {
+            showAlert("확인", "이미 같은 근무 기록이 있습니다.");
+            setEditModalVisible(false);
+            return;
           }
-          return row;
-        }));
+          const parsedDate = parseSheetDate(normalizedDate) || undefined;
+          const newLog: WorkRow = {
+            date: normalizedDate,
+            shift: normalizedShift,
+            day: koreanDay(normalizedDate),
+            start: normalizedStart,
+            end: normalizedEnd,
+            work: newDuration,
+            email: targetEmail,
+            _dt: parsedDate
+          };
+          setLogRows(prev => [newLog, ...prev]);
+          if (parsedDate) setSelectedMonth(toYYMM(parsedDate));
+          showAlert("완료", "근무 기록이 추가되었습니다.");
+        }
         setEditModalVisible(false);
       } else {
-        showAlert("실패", res.error || "해당 기록을 찾을 수 없거나 오류가 발생했습니다."); // ✅ 수정됨
+        showAlert("실패", res.error || "해당 기록을 찾을 수 없거나 오류가 발생했습니다.");
       }
     } catch (e) {
       console.error(e);
-      showAlert("오류", "서버 전송 중 문제가 발생했습니다."); // ✅ 수정됨
+      showAlert("오류", "서버 전송 중 문제가 발생했습니다.");
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  const processDeleteLog = async () => {
+    if (!editingLog) return;
+    setSavingEdit(true);
+    try {
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, {
+        action: "delete_attendance_log",
+        targetDate: editingLog.date,
+        targetEmail: editingLog.email,
+        targetClass: editingLog.shift,
+        oldStart: editingLog.start,
+        oldEnd: editingLog.end || ""
+      });
+
+      if (!res.ok) {
+        showAlert("삭제 실패", res.error || "기록을 찾을 수 없습니다.");
+        return;
+      }
+
+      setLogRows(prev => prev.filter(log => log !== editingLog));
+      setEditModalVisible(false);
+      showAlert("완료", "근무 기록이 삭제되었습니다.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteLog = () => {
+    if (!editingLog || savingEdit) return;
+    const message = `${editingLog.date} ${editingLog.shift} 기록을 삭제하시겠습니까?`;
+    if (Platform.OS === 'web') {
+      if (window.confirm(message)) processDeleteLog();
+      return;
+    }
+    Alert.alert("근무 기록 삭제", message, [
+      { text: "취소", style: "cancel" },
+      { text: "삭제", style: "destructive", onPress: processDeleteLog }
+    ]);
   };
 
   // 1. 초기 데이터 로드 (조교 목록 & 내 권한)
@@ -192,6 +461,7 @@ export default function AssistantScreen() {
           roles: rawRole.split(",").map((s: string) => s.trim()).filter(Boolean),
           status: status,
           startDate: row[ASSISTANT_HEADERS.START_DATE] || "",
+          account: row[ASSISTANT_HEADERS.ACCOUNT] || "",
           isInactive: status.includes("비근무"),
         };
       });
@@ -239,6 +509,7 @@ export default function AssistantScreen() {
     }
 
     setTargetName(name);
+    setTargetEmail(email.trim().toLowerCase());
     setLogModalVisible(true);
     setLoadingLogs(true);
     setLogRows([]);
@@ -255,7 +526,7 @@ export default function AssistantScreen() {
         .map((r: any) => ({
           date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
           shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
-          day: String(r[ATTENDANCE_LOG_HEADERS.DAY] ?? "").trim(), // ✅ [추가] 요일 가져오기
+          day: String(r[ATTENDANCE_LOG_HEADERS.DAY] ?? "").trim(),
           start: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim(),
           end: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim(),
           work: String(r["근무 시간"] ?? "").trim(),
@@ -344,6 +615,21 @@ export default function AssistantScreen() {
     </TouchableOpacity>
   );
 
+  const ManageActions = ({ item }: { item: Assistant }) => (
+    <View style={styles.manageActionRow}>
+      <TouchableOpacity style={styles.smallManageBtn} onPress={() => openEditAssistantModal(item)}>
+        <Ionicons name="create-outline" size={14} color="#374151" />
+        <Text style={styles.smallManageText}>정보 수정</Text>
+      </TouchableOpacity>
+      {!!item.email && (
+        <TouchableOpacity style={styles.smallLogBtn} onPress={() => handleViewLogs(item.email, item.name)}>
+          <Ionicons name="time-outline" size={14} color="#4F46E5" />
+          <Text style={styles.smallLogBtnText}>근무 기록</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
   // 🔹 조교 카드 컴포넌트
   const StaffCard = ({ item }: { item: Assistant }) => (
     <View style={[styles.card, item.isInactive && styles.cardInactive]}>
@@ -374,14 +660,7 @@ export default function AssistantScreen() {
                     <View style={{height: 20}} /> 
                 )}
             </View>
-            {(isAdmin || isManager) && item.email ? (
-                <TouchableOpacity 
-                    style={styles.smallLogBtn} 
-                    onPress={() => handleViewLogs(item.email, item.name)}
-                >
-                    <Text style={styles.smallLogBtnText}>근무 기록</Text>
-                </TouchableOpacity>
-            ) : null}
+            {(isAdmin || isManager) && <ManageActions item={item} />}
         </View>
       </View>
       
@@ -444,15 +723,6 @@ export default function AssistantScreen() {
                 <Text style={styles.execDateText}>{item.startDate}</Text>
               </View>
             )}
-            {(isAdmin || isManager) && (
-              <TouchableOpacity 
-                  style={[styles.logBtn, {alignSelf: 'flex-start', marginLeft: 0, marginTop: 2}]} 
-                  onPress={() => handleViewLogs(item.email, item.name)}
-              >
-                  <Ionicons name="time-outline" size={14} color="#4F46E5" />
-                  <Text style={styles.logBtnText}>근무 기록 보기</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           <View style={styles.execInfoRow}>
@@ -469,6 +739,8 @@ export default function AssistantScreen() {
               </View>
             ) : null}
           </View>
+
+          {(isAdmin || isManager) && <ManageActions item={item} />}
 
           <View style={styles.execCtaRow}>
             <TouchableOpacity style={[styles.execCtaBtn, { borderColor: accent }]} onPress={() => handleCall(item.phone)} disabled={!item.phone}>
@@ -496,8 +768,18 @@ export default function AssistantScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={styles.pageHeader}>
-          <Text style={styles.headerTitle}>주소록</Text>
-          <Text style={styles.headerDesc}>팀원 연락처 및 역할 정보입니다.</Text>
+          <View style={styles.pageHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headerTitle}>주소록</Text>
+              <Text style={styles.headerDesc}>팀원 연락처 및 역할 정보입니다.</Text>
+            </View>
+            {(isAdmin || isManager) && (
+              <TouchableOpacity style={styles.addAssistantBtn} onPress={openAddAssistantModal}>
+                <Ionicons name="person-add-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.addAssistantText}>조교 추가</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {ceos.length > 0 && (
@@ -555,15 +837,60 @@ export default function AssistantScreen() {
         </View>
       </ScrollView>
 
+      <Modal
+        visible={assistantModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setAssistantModalVisible(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <View style={styles.modalView}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editingAssistant ? "조교 정보 수정" : "새 조교 등록"}</Text>
+              <TouchableOpacity style={styles.headerIconBtn} onPress={() => setAssistantModalVisible(false)} accessibilityLabel="닫기">
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.assistantFormScroll} contentContainerStyle={{ paddingBottom: 4 }}>
+              <AssistantInput label="이름 (필수)" value={assistantForm.name} onChange={value => updateAssistantForm('name', value)} />
+              <AssistantInput label="Gmail (필수)" value={assistantForm.email} onChange={value => updateAssistantForm('email', value)} keyboardType="email-address" />
+              <AssistantInput label="전화번호" value={assistantForm.phone} onChange={value => updateAssistantForm('phone', value)} keyboardType="phone-pad" />
+              <AssistantInput label="직책" value={assistantForm.position} onChange={value => updateAssistantForm('position', value)} />
+              <AssistantInput label="역할 (쉼표로 구분)" value={assistantForm.role} onChange={value => updateAssistantForm('role', value)} />
+              <AssistantInput label="근무 시작" value={assistantForm.startDate} onChange={value => updateAssistantForm('startDate', value)} />
+              <AssistantInput label="계좌번호" value={assistantForm.account} onChange={value => updateAssistantForm('account', value)} />
+              <AssistantInput label="비고" value={assistantForm.status} onChange={value => updateAssistantForm('status', value)} />
+            </ScrollView>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity disabled={savingAssistant} style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setAssistantModalVisible(false)}>
+                <Text style={styles.modalBtnTextCancel}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity disabled={savingAssistant} style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleSaveAssistant}>
+                {savingAssistant ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnTextConfirm}>저장</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ✅ 근무 기록 모달 */}
       <Modal visible={logModalVisible} animationType="slide" transparent onRequestClose={() => setLogModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalView}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{targetName} 님의 근무 기록</Text>
-              <TouchableOpacity onPress={() => setLogModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
+              <View style={styles.modalHeaderActions}>
+                {(isAdmin || isManager) && (
+                  <TouchableOpacity style={styles.headerIconBtn} onPress={openAddModal} accessibilityLabel="근무 기록 추가">
+                    <Ionicons name="add" size={24} color="#4F46E5" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.headerIconBtn} onPress={() => setLogModalVisible(false)} accessibilityLabel="닫기">
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {loadingLogs ? (
@@ -634,15 +961,28 @@ export default function AssistantScreen() {
       <Modal visible={editModalVisible} animationType="fade" transparent onRequestClose={() => setEditModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalView, { width: '85%' }]}>
-            <Text style={styles.modalTitle}>시간 수정</Text>
-            
-            {editingLog && (
-              <View style={{ width: '100%', marginBottom: 20 }}>
-                <Text style={styles.editLabel}>날짜 / 수업</Text>
-                <TextInput 
-                  style={[styles.editInput, styles.readOnlyInput]} 
-                  value={`${editingLog.date} | ${editingLog.shift}`} 
-                  editable={false} 
+            <Text style={styles.modalTitle}>{editingLog ? "근무 기록 수정" : "근무 기록 추가"}</Text>
+
+            <View style={{ width: '100%', marginBottom: 20 }}>
+                <Text style={styles.editLabel}>날짜</Text>
+                <TextInput
+                  style={[styles.editInput, editingLog && styles.readOnlyInput]}
+                  value={editDate}
+                  onChangeText={setEditDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#9CA3AF"
+                  maxLength={10}
+                  editable={!editingLog}
+                />
+
+                <Text style={styles.editLabel}>수업 / 근무명</Text>
+                <TextInput
+                  style={[styles.editInput, editingLog && styles.readOnlyInput]}
+                  value={editShift}
+                  onChangeText={setEditShift}
+                  placeholder="예: 경기고 통합과학"
+                  placeholderTextColor="#9CA3AF"
+                  editable={!editingLog}
                 />
 
                 <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -650,31 +990,37 @@ export default function AssistantScreen() {
                     <Text style={styles.editLabel}>출근</Text>
                     <TextInput 
                       style={styles.editInput} 
-                      value={editStart} onChangeText={setEditStart} placeholder="HH:MM" maxLength={5}
+                      value={editStart} onChangeText={setEditStart} placeholder="HH:MM" placeholderTextColor="#9CA3AF" maxLength={5}
                     />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.editLabel}>퇴근</Text>
                     <TextInput 
                       style={styles.editInput} 
-                      value={editEnd} onChangeText={setEditEnd} placeholder="HH:MM" maxLength={5}
+                      value={editEnd} onChangeText={setEditEnd} placeholder="HH:MM" placeholderTextColor="#9CA3AF" maxLength={5}
                     />
                   </View>
                 </View>
                 <Text style={{textAlign:'right', marginTop:5, color:'#4F46E5', fontWeight:'bold'}}>
                   시간: {calculateDuration(editStart, editEnd)}
                 </Text>
-              </View>
-            )}
+            </View>
 
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}>
+              <TouchableOpacity disabled={savingEdit} style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setEditModalVisible(false)}>
                 <Text style={styles.modalBtnTextCancel}>취소</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleSaveEdit}>
+              <TouchableOpacity disabled={savingEdit} style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleSaveEdit}>
                 {savingEdit ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnTextConfirm}>저장</Text>}
               </TouchableOpacity>
             </View>
+
+            {editingLog && (
+              <TouchableOpacity disabled={savingEdit} style={styles.deleteRecordBtn} onPress={handleDeleteLog}>
+                <Ionicons name="trash-outline" size={17} color="#DC2626" />
+                <Text style={styles.deleteRecordText}>이 기록 삭제</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -688,8 +1034,11 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   
   pageHeader: { padding: 20, paddingTop: 60, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#E5E7EB", marginBottom: 10 },
+  pageHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerTitle: { fontSize: 24, fontWeight: "800", color: "#111" },
   headerDesc: { fontSize: 14, color: "#6B7280", marginTop: 4 },
+  addAssistantBtn: { minHeight: 40, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 8, backgroundColor: '#4F46E5' },
+  addAssistantText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 
   filterBox: { backgroundColor: "#fff", padding: 15, borderRadius: 12,marginBottom: 16,borderWidth: 1,borderColor: "#E5E7EB"},
   filterRow: { flexDirection: 'row', alignItems: 'center' },
@@ -757,7 +1106,10 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
   modalView: { width: "90%", maxHeight: "85%", backgroundColor: "white", borderRadius: 16, padding: 20, alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
   modalHeader: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+  modalHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerIconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   modalTitle: { fontSize: 18, fontWeight: "bold", color: "#111" },
+  assistantFormScroll: { width: '100%', maxHeight: 480 },
   emptyLog: { padding: 30, alignItems: 'center' },
   emptyLogText: { color: '#999' },
   
@@ -778,9 +1130,14 @@ const styles = StyleSheet.create({
   modalBtnTextCancel: { color: "#374151", fontWeight: "700", fontSize: 14 },
   modalBtnTextConfirm: { color: "white", fontWeight: "700", fontSize: 14 },
   roleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  smallLogBtn: { paddingHorizontal: 10, paddingVertical: 5, backgroundColor: '#EEF2FF', borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' },
+  manageActionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  smallManageBtn: { minHeight: 32, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#F3F4F6', borderRadius: 6, borderWidth: 1, borderColor: '#D1D5DB' },
+  smallManageText: { fontSize: 11, fontWeight: '700', color: '#374151' },
+  smallLogBtn: { minHeight: 32, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#EEF2FF', borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' },
   smallLogBtnText: { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
   editLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 4, marginTop: 10 },
   editInput: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 10, fontSize: 16, backgroundColor: '#F9FAFB', color: '#111' },
   readOnlyInput: { backgroundColor: '#F3F4F6', color: '#6B7280' },
+  deleteRecordBtn: { width: '100%', minHeight: 44, marginTop: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FEF2F2', borderRadius: 8 },
+  deleteRecordText: { color: '#DC2626', fontSize: 14, fontWeight: '700' },
 });

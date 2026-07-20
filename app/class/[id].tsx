@@ -1,22 +1,21 @@
 // app/class/[id].tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid, Modal, TouchableOpacity } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
-import * as Location from "expo-location";
 import * as Application from "expo-application";
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { Ionicons } from "@expo/vector-icons";
 
 // Utils & Config
 import { fetchSheetData, fetchClassSheet, fetchClassSheetRaw } from "../../utils/googleSheet_csv";
-import { postSheetData } from "../../utils/sheetApi";
-import { getActiveSession, startSession, clearSession, ActiveSession } from "../../utils/activeSession";
+import { getAttendanceStatus, postSheetData } from "../../utils/sheetApi";
+import { getActiveSession, startSession, clearSession } from "../../utils/activeSession";
 import { getCurrentUserEmail } from "../../utils/currentUser";
 import DirectSms from "../../utils/smsSender";
 import { getClassUrls } from "../../utils/classInfo";
 
 // PERMISSION_HEADERS 추가
-import { CSV_URLS, API_URLS, CLASSES_HEADERS, POSITIONS_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS, 
+import { CSV_URLS, API_URLS, CLASSES_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS,
   CLASS_SHEET_HEADERS, CLASS_SHEET_HEADER_ROW, CLASS_DATA_COL_SHIFT, CLASS_SESSION_STRIDE, SHEET_NAMES, 
   PERMISSION_HEADERS, ASSISTANT_HEADERS, SCHEDULE_HEADERS,  } from "../../config/sheetConfig";
 // import { ADMIN_DEVICE_IDS } from "../../config/adminConfig"; 
@@ -31,10 +30,6 @@ LocaleConfig.locales['kr'] = {
   today: "오늘"
 };
 LocaleConfig.defaultLocale = 'kr';
-
-// Constants
-const WARN_RADIUS_METERS = 30; 
-const ACCEPT_RADIUS_METERS = 100;
 
 // ... (Helpers 함수들은 그대로 유지) ...
 const hmToMinutes = (hm: string) => {
@@ -55,11 +50,42 @@ const todayYmd = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
-const formatCoord5 = (n: number) => (Math.round(n * 1e5) / 1e5).toFixed(5);
-const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371000, toRad = (d: number) => (d * Math.PI) / 180;
-  const a = Math.sin(toRad(lat2 - lat1) / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin((toRad(lon2 - lon1)) / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: "월" },
+  { value: 2, label: "화" },
+  { value: 3, label: "수" },
+  { value: 4, label: "목" },
+  { value: 5, label: "금" },
+  { value: 6, label: "토" },
+  { value: 0, label: "일" },
+];
+
+const parseLocalDate = (ymd: string) => {
+  const match = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (date.getFullYear() !== Number(match[1]) || date.getMonth() !== Number(match[2]) - 1 || date.getDate() !== Number(match[3])) return null;
+  return date;
+};
+
+const formatLocalDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const weekdaysFromText = (value: string) =>
+  WEEKDAY_OPTIONS.filter(option => String(value || "").includes(option.label)).map(option => option.value);
+
+const buildRecurringDates = (startYmd: string, weekdays: number[], count: number) => {
+  const cursor = parseLocalDate(startYmd);
+  if (!cursor || weekdays.length === 0 || count < 1) return [];
+  const selected = new Set(weekdays);
+  const dates: string[] = [];
+
+  for (let offset = 0; offset < 730 && dates.length < count; offset += 1) {
+    if (selected.has(cursor.getDay())) dates.push(formatLocalDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
 };
 
 export default function ClassDetailScreen() {
@@ -74,12 +100,10 @@ export default function ClassDetailScreen() {
   if (!navReady || !userEmail) return null;
 
   // --- State ---
-  const [actionLockUntil, setActionLockUntil] = useState<number>(0);
+  const actionInFlightRef = useRef(false);
   const [row, setRow] = useState<any>(null);
-  const [posMap, setPosMap] = useState<Map<string, string> | null>(null);
   const [loading, setLoading] = useState(true);
   
-  const [checkingGps, setCheckingGps] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sendingNotice, setSendingNotice] = useState(false); 
   const [sendingIndividual, setSendingIndividual] = useState(false);
@@ -100,6 +124,9 @@ export default function ClassDetailScreen() {
   const [scheduleSession, setScheduleSession] = useState("");
   const [scheduleNote, setScheduleNote] = useState("");
   const [scheduleWorkers, setScheduleWorkers] = useState("");
+  const [scheduleMode, setScheduleMode] = useState<"single" | "repeat">("single");
+  const [repeatCount, setRepeatCount] = useState("8");
+  const [repeatWeekdays, setRepeatWeekdays] = useState<number[]>([]);
 
   const [template, setTemplate] = useState(INDIVIDUAL_MESSAGE_TEMPLATE);
   const [isAdmin, setIsAdmin] = useState(false);       // 이메일이 Admin인 경우
@@ -184,22 +211,13 @@ export default function ClassDetailScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [cData, pData, aData, sData] = await Promise.all([
+        const [cData, aData, sData] = await Promise.all([
           fetchSheetData(CSV_URLS.CLASSES), 
-          fetchSheetData(CSV_URLS.POSITIONS),
           fetchSheetData(CSV_URLS.ASSISTANT_INFO),
           fetchSheetData(CSV_URLS.CLASS_SCHEDULES)
         ]);
 
         setRow((cData || []).find((r: any) => String(r[CLASSES_HEADERS.CLASS_ID] ?? "").trim() === targetId) || null);
-        
-        const map = new Map<string, string>();
-        (pData || []).forEach((r: any) => {
-          const key = String(r[POSITIONS_HEADERS.PLACE] ?? "").trim();
-          const val = String(r[POSITIONS_HEADERS.PLACE_LOCATION] ?? "").trim();
-          if (key && val) map.set(key, val);
-        });
-        setPosMap(map);
 
         if (Array.isArray(aData) && userEmail) {
           const myRecord = aData.find((r: any) => 
@@ -245,143 +263,184 @@ export default function ClassDetailScreen() {
     return (school && subject) ? `${school} ${subject}` : (school || subject || "수업");
   }, [row]);
 
-  const attendanceSpot = useMemo(() => {
-    if (!row || !posMap) return null;
-    const placeName = String(row[CLASSES_HEADERS.PLACE] ?? "").trim();
-    if (!placeName) return null;
-    
-    const rawCoord = posMap.get(placeName) ?? "";
-    const parts = rawCoord.replace(/[()]/g, "").split(",").map(s => s.trim());
-    if (parts.length < 2) return null;
-    return { name: placeName, lat: Number(parts[0]), lon: Number(parts[1]), radiusMeters: ACCEPT_RADIUS_METERS };
-  }, [row, posMap]);
+  const recurringDates = useMemo(() => {
+    const count = Number(repeatCount);
+    if (!Number.isInteger(count) || count < 1 || count > 60) return [];
+    return buildRecurringDates(selectedDate, repeatWeekdays, count);
+  }, [repeatCount, repeatWeekdays, selectedDate]);
+
+  const scheduleMarkedDates = useMemo(() => {
+    if (scheduleMode === "repeat" && !isEditMode) {
+      return recurringDates.reduce<Record<string, any>>((marked, date, index) => {
+        marked[date] = {
+          selected: true,
+          selectedColor: index === 0 ? "#4F46E5" : "#10B981",
+        };
+        return marked;
+      }, {});
+    }
+    return selectedDate ? { [selectedDate]: { selected: true, selectedColor: "#4F46E5" } } : {};
+  }, [isEditMode, recurringDates, scheduleMode, selectedDate]);
 
   // 3. 출석 상태 확인
   const loadAttendanceStatus = useCallback(async () => {
-    const log = await fetchSheetData(`${CSV_URLS.ATTENDANCE_LOG}&t=${Date.now()}`);
-    const myLog = (log || []).filter((r: any) => {
-      const cid = String(r[ATTENDANCE_LOG_HEADERS.CLASS_ID] ?? "").trim();
-      const mail = String(r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ?? r["Email"] ?? "").trim().toLowerCase();
-      return cid === targetId && mail === userEmail!.toLowerCase();
-    });
+    const normalizedEmail = userEmail!.trim().toLowerCase();
+    const res = await getAttendanceStatus(
+      API_URLS.ATTENDANCE_LOG,
+      SHEET_NAMES.ATTENDANCE,
+      normalizedEmail,
+    );
 
-    if (myLog.length === 0) {
-      setCheckedIn(false); setCheckInTime(null); setMessage("출근 버튼을 눌러 진행하세요."); return;
+    if (!res.ok) {
+      const local = await getActiveSession();
+      if (local && local.email === normalizedEmail && local.classId === targetId) {
+        setCheckedIn(true);
+        setCheckInTime(local.startHm);
+        setMessage("현재 출근 상태입니다. (서버 상태 확인 실패)");
+      } else {
+        setMessage(`출퇴근 상태 확인 실패: ${res.error || "오류 발생"}`);
+      }
+      return;
     }
 
-    const active = myLog.find((r: any) => {
-      const st = String(r[ATTENDANCE_LOG_HEADERS.STATUS] ?? "").trim();
-      return st === "출근";
-    });
-
-    if (active) {
+    const active = res.data;
+    if (active?.checkedIn && active.classId === targetId && active.startTime) {
       setCheckedIn(true);
-      setCheckInTime(String(active[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim());
-      setMessage("✅ 현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
-    } else {
-      setCheckedIn(false); setCheckInTime(null); setMessage("출근 버튼을 눌러 진행하세요.");
+      setCheckInTime(active.startTime);
+      setMessage("현재 출근 상태입니다. (퇴근 버튼을 누르세요)");
+      await startSession({
+        classId: active.classId,
+        className: active.className || classTitle,
+        email: normalizedEmail,
+        workDate: active.workDate || todayYmd(),
+        startHm: active.startTime,
+        startedAt: Date.now(),
+      });
+      return;
     }
-  }, [targetId, userEmail]);
+
+    setCheckedIn(false);
+    setCheckInTime(null);
+
+    if (active?.checkedIn && active.classId) {
+      const activeName = active.className || active.classId;
+      setMessage(`현재 "${activeName}" 수업에 출근 중입니다.`);
+      if (active.startTime) {
+        await startSession({
+          classId: active.classId,
+          className: activeName,
+          email: normalizedEmail,
+          workDate: active.workDate || todayYmd(),
+          startHm: active.startTime,
+          startedAt: Date.now(),
+        });
+      }
+      return;
+    }
+
+    const local = await getActiveSession();
+    if (local?.email === normalizedEmail) await clearSession();
+    setMessage("출근 버튼을 눌러 진행하세요.");
+  }, [classTitle, targetId, userEmail]);
 
   useEffect(() => { if (row) loadAttendanceStatus(); }, [row, loadAttendanceStatus]);
 
-  // 4. GPS
-  const getGps = async () => {
-    if (!attendanceSpot) { setMessage("❌ 수업 장소 좌표가 없습니다."); return null; }
-    setCheckingGps(true); setMessage("위치 확인 중…");
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { setMessage("❌ 위치 권한이 필요합니다."); return null; }
-      
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
-      const { latitude, longitude } = loc.coords;
-      const dist = haversine(latitude, longitude, attendanceSpot.lat, attendanceSpot.lon);
-      return { lat: latitude, lon: longitude, dist };
-    } catch { setMessage("❌ 위치 확인 실패"); return null; }
-    finally { setCheckingGps(false); }
-  };
-
-  // 5. 출근 핸들러
+  // 4. 출근 핸들러
   const handleCheckIn = async () => {
-    const existing = await getActiveSession();
-    if (existing && existing.email === userEmail!.toLowerCase() && existing.classId !== targetId) {
-      Alert.alert("알림", `이미 "${existing.className}" 수업에 출근 중입니다.`); return;
-    }
-    const gps = await getGps();
-    if (!gps) return;
-
-    const distM = Math.round(gps.dist);
-    let remark = distM > WARN_RADIUS_METERS ? `⚠ 지정 위치 벗어남 (${distM}m)` : "";
-    const startTime = nowHm();
-
-    const payload = {
-      action: "checkin", 
-      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: todayYmd(),
-      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
-      [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(),
-      [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
-      [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
-      [ATTENDANCE_LOG_HEADERS.WORKERS]: workerName || "이름 없음",
-      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail,
-      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: startTime,
-      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: "",
-      [ATTENDANCE_LOG_HEADERS.STATUS]: "출근",
-      [ATTENDANCE_LOG_HEADERS.WORKER_LOCATION]: `${formatCoord5(gps.lat)},${formatCoord5(gps.lon)}`,
-      [ATTENDANCE_LOG_HEADERS.NOTE]: remark,
-    };
-
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     setSaving(true);
-    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
-    setSaving(false);
 
-    if (res.ok) {
-      setCheckedIn(true); setCheckInTime(startTime); setMessage(`✅ 출근 완료 (${distM}m)`);
-      await startSession({ classId: targetId, className: classTitle, email: userEmail!.toLowerCase(), workDate: todayYmd(), startHm: startTime, startedAt: Date.now() });
-      setActionLockUntil(Date.now() + 2000);
-      setTimeout(loadAttendanceStatus, 1500);
-    } else {
-      setMessage(`❌ 출근 실패: ${res.error || "오류 발생"}`);
+    try {
+      const normalizedEmail = userEmail!.trim().toLowerCase();
+      const existing = await getActiveSession();
+      if (existing && existing.email === normalizedEmail && existing.classId !== targetId) {
+        Alert.alert("알림", `이미 "${existing.className}" 수업에 출근 중입니다.`);
+        return;
+      }
+
+      const startTime = nowHm();
+      const payload = {
+        action: "checkin",
+        [ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]: todayYmd(),
+        [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
+        [ATTENDANCE_LOG_HEADERS.QUARTER]: String(row![CLASSES_HEADERS.QUARTER] ?? "").trim(),
+        [ATTENDANCE_LOG_HEADERS.CLASS_NAME]: classTitle,
+        [ATTENDANCE_LOG_HEADERS.DAY]: String(row![CLASSES_HEADERS.DAY] ?? "").trim(),
+        [ATTENDANCE_LOG_HEADERS.WORKERS]: workerName || "이름 없음",
+        [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: normalizedEmail,
+        [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: startTime,
+        [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: "",
+        [ATTENDANCE_LOG_HEADERS.STATUS]: "출근",
+        [ATTENDANCE_LOG_HEADERS.WORKER_LOCATION]: "",
+        [ATTENDANCE_LOG_HEADERS.NOTE]: "",
+      };
+
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
+      if (!res.ok) {
+        setMessage(`출근 실패: ${res.error || "오류 발생"}`);
+        return;
+      }
+
+      const confirmedStart = String(res.data?.attendance?.startTime || startTime).trim();
+      setCheckedIn(true);
+      setCheckInTime(confirmedStart);
+      setMessage(res.data?.alreadyActive ? "이미 출근 처리되어 있습니다." : "출근 완료");
+      await startSession({
+        classId: targetId,
+        className: classTitle,
+        email: normalizedEmail,
+        workDate: String(res.data?.attendance?.workDate || todayYmd()),
+        startHm: confirmedStart,
+        startedAt: Date.now(),
+      });
+    } finally {
+      actionInFlightRef.current = false;
+      setSaving(false);
     }
   };
 
-  // 6. 퇴근 핸들러
+  // 5. 퇴근 핸들러
   const handleCheckOut = async () => {
-    if (Date.now() < actionLockUntil) return;
+    if (actionInFlightRef.current) return;
     if (!checkInTime) { await loadAttendanceStatus(); return; }
-    
-    const gps = await getGps(); 
 
-    const endTime = nowHm();
-    const startM = hmToMinutes(checkInTime);
-    const endM = hmToMinutes(endTime);
-    let workHm = "";
-    if (startM !== null && endM !== null) {
-      let diff = endM - startM;
-      if (diff < 0) diff += 24 * 60;
-      workHm = minutesToHm(diff);
-    }
-
-    const payload = {
-      action: "checkout_update",
-      [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
-      [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail, 
-      [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,
-      "근무 시간": workHm,
-    };
-
+    actionInFlightRef.current = true;
     setSaving(true);
-    setCheckedIn(false); setCheckInTime(null); setMessage("✅ 퇴근 처리 중…");
-    await clearSession();
+    setMessage("퇴근 처리 중...");
 
-    const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
-    setSaving(false);
+    try {
+      const endTime = nowHm();
+      const startM = hmToMinutes(checkInTime);
+      const endM = hmToMinutes(endTime);
+      let workHm = "";
+      if (startM !== null && endM !== null) {
+        let diff = endM - startM;
+        if (diff < 0) diff += 24 * 60;
+        workHm = minutesToHm(diff);
+      }
 
-    if (res.ok) {
-      setMessage("✅ 퇴근 처리 완료");
-      setTimeout(loadAttendanceStatus, 1500);
-    } else {
-      setMessage(`❌ 퇴근 실패: ${res.error}`);
-      loadAttendanceStatus();
+      const payload = {
+        action: "checkout_update",
+        [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
+        [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail!.trim().toLowerCase(),
+        [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,
+        "근무 시간": workHm,
+      };
+
+      const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
+      if (!res.ok) {
+        setMessage(`퇴근 실패: ${res.error || "오류 발생"}`);
+        return;
+      }
+
+      setCheckedIn(false);
+      setCheckInTime(null);
+      setMessage("퇴근 처리 완료");
+      await clearSession();
+    } finally {
+      actionInFlightRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -716,7 +775,7 @@ export default function ClassDetailScreen() {
               const res = await postSheetData(API_URLS.MESSAGE_LOG, SHEET_NAMES.MESSAGE_LOG, payload);
 
               if (res.ok) {
-                showAlert("삭제 완료", `${res.count || unsentMessages.length}건의 메시지가 삭제되었습니다.`);
+                showAlert("삭제 완료", `${res.data?.count || unsentMessages.length}건의 메시지가 삭제되었습니다.`);
                 setSmsReviewModalVisible(false); // 모달 닫기
                 setUnsentMessages([]); // 목록 초기화
               } else {
@@ -791,27 +850,61 @@ export default function ClassDetailScreen() {
     if (!selectedDate) { showAlert("알림", "날짜를 선택해주세요."); return; }
     if (!scheduleSession) { showAlert("알림", "차시를 입력해주세요."); return; }
 
+    const firstSession = Number(scheduleSession);
+    if (!Number.isInteger(firstSession) || firstSession < 1) {
+      showAlert("입력 확인", "차시는 1 이상의 숫자로 입력해주세요.");
+      return;
+    }
+
+    const isBulkAdd = !isEditMode && scheduleMode === "repeat";
+    if (isBulkAdd && repeatWeekdays.length === 0) {
+      showAlert("입력 확인", "반복할 요일을 하나 이상 선택해주세요.");
+      return;
+    }
+    if (isBulkAdd && recurringDates.length === 0) {
+      showAlert("입력 확인", "등록 횟수는 1~60 사이로 입력해주세요.");
+      return;
+    }
+
+    const dates = isBulkAdd ? recurringDates : [selectedDate];
+    const generatedRows = dates.map((date, index) => ({
+      classId: targetId,
+      quarter: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
+      className: classTitle,
+      day: String(row[CLASSES_HEADERS.DAY] ?? ""),
+      session: String(firstSession + index),
+      date,
+      workers: scheduleWorkers,
+      note: scheduleNote
+    }));
+
+    if (!isEditMode) {
+      const existingSessions = new Set(scheduleRows.map(item => String(item[SCHEDULE_HEADERS.SESSION] ?? "").trim()));
+      const conflicts = generatedRows.filter(item => existingSessions.has(item.session)).map(item => item.session);
+      if (conflicts.length > 0) {
+        showAlert("차시 중복", `${conflicts.join(", ")}차시는 이미 등록되어 있습니다.`);
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-
-      const action = isEditMode ? "update_class_schedule" : "add_class_schedule";
-      
-      const payload = {
-        action: action,
-        classId: targetId,
-        quarter: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
-        className: classTitle,
-        day: String(row[CLASSES_HEADERS.DAY] ?? ""),
-        session: scheduleSession,
-        date: selectedDate,
-        workers: scheduleWorkers,
-        note: scheduleNote
+      const payload = isBulkAdd ? {
+        action: "add_class_schedules",
+        schedules: generatedRows
+      } : {
+        action: isEditMode ? "update_class_schedule" : "add_class_schedule",
+        ...generatedRows[0]
       };
 
       const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.SCHEDULE, payload);
       
       if (res.ok) {
-        const msg = isEditMode ? "일정이 수정되었습니다." : "새 일정이 등록되었습니다.";
+        const msg = isEditMode
+          ? "일정이 수정되었습니다."
+          : isBulkAdd
+            ? `${generatedRows.length}개의 일정이 등록되었습니다.`
+            : "새 일정이 등록되었습니다.";
         showAlert("성공", msg);
         
         closeModal(); // 모달 닫기 및 초기화
@@ -831,20 +924,17 @@ export default function ClassDetailScreen() {
               return item;
             });
           } else {
-            // 2. 추가 모드: 새 객체를 만들어서 목록에 추가하고 정렬
-            const newRow = {
-              [SCHEDULE_HEADERS.CLASS_ID]: targetId,
-              [SCHEDULE_HEADERS.QUARTER]: String(row[CLASSES_HEADERS.QUARTER] ?? ""),
-              [SCHEDULE_HEADERS.CLASS_NAME]: classTitle,
-              [SCHEDULE_HEADERS.DAY]: String(row[CLASSES_HEADERS.DAY] ?? ""),
-              [SCHEDULE_HEADERS.SESSION]: scheduleSession,
-              [SCHEDULE_HEADERS.DATE]: selectedDate,
-              [SCHEDULE_HEADERS.WORKERS]: scheduleWorkers,
-              [SCHEDULE_HEADERS.NOTE]: scheduleNote
-            };
-            const newList = [...prevRows, newRow];
-            
-            // 차시 순서대로 다시 정렬
+            const newRows = generatedRows.map(item => ({
+              [SCHEDULE_HEADERS.CLASS_ID]: item.classId,
+              [SCHEDULE_HEADERS.QUARTER]: item.quarter,
+              [SCHEDULE_HEADERS.CLASS_NAME]: item.className,
+              [SCHEDULE_HEADERS.DAY]: item.day,
+              [SCHEDULE_HEADERS.SESSION]: item.session,
+              [SCHEDULE_HEADERS.DATE]: item.date,
+              [SCHEDULE_HEADERS.WORKERS]: item.workers,
+              [SCHEDULE_HEADERS.NOTE]: item.note
+            }));
+            const newList = [...prevRows, ...newRows];
             return newList.sort((a: any, b: any) => 
               (Number(a[SCHEDULE_HEADERS.SESSION]) || 0) - (Number(b[SCHEDULE_HEADERS.SESSION]) || 0)
             );
@@ -871,6 +961,23 @@ export default function ClassDetailScreen() {
     setScheduleSession("");
     setScheduleWorkers("");
     setScheduleNote("");
+    setScheduleMode("single");
+    setRepeatCount("8");
+    setRepeatWeekdays([]);
+  };
+
+  const openAddScheduleModal = () => {
+    const currentSessions = scheduleRows.map(item => Number(item[SCHEDULE_HEADERS.SESSION])).filter(Number.isFinite);
+    const nextSession = currentSessions.length > 0 ? Math.max(...currentSessions) + 1 : 1;
+    setIsEditMode(false);
+    setScheduleMode("single");
+    setSelectedDate("");
+    setScheduleSession(String(nextSession));
+    setScheduleWorkers(String(row[CLASSES_HEADERS.WORKERS] ?? ""));
+    setScheduleNote("");
+    setRepeatCount("8");
+    setRepeatWeekdays(weekdaysFromText(String(row[CLASSES_HEADERS.DAY] ?? "")));
+    setScheduleModalVisible(true);
   };
 
   const handlePressSchedule = (item: any) => {
@@ -881,6 +988,7 @@ export default function ClassDetailScreen() {
     }
 
     setIsEditMode(true); // 수정 모드 켜기
+    setScheduleMode("single");
 
     // 선택된 일정 데이터로 입력창 채우기
     setSelectedDate(item[SCHEDULE_HEADERS.DATE]);
@@ -894,7 +1002,7 @@ export default function ClassDetailScreen() {
   if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
   if (!row) return <View style={styles.container}><Text>수업 정보를 찾을 수 없습니다.</Text></View>;
 
-  const fabDisabled = checkingGps || saving || !attendanceSpot || Date.now() < actionLockUntil;
+  const fabDisabled = saving;
 
   return (
     <View style={{ flex: 1 }}>
@@ -931,7 +1039,7 @@ export default function ClassDetailScreen() {
             <Text style={[styles.cardTitle, { marginBottom: 0 }]}>수업 일정</Text>
             
             {(isAdmin || isManager) && (
-              <Pressable onPress={() => setScheduleModalVisible(true)} hitSlop={10}>
+              <Pressable onPress={openAddScheduleModal} hitSlop={10}>
                 <Text style={{ color: '#4F46E5', fontWeight: '700', fontSize: 14 }}>+ 일정 추가</Text>
               </Pressable>
             )}
@@ -1020,7 +1128,7 @@ export default function ClassDetailScreen() {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>출근 관리</Text>
-          <Text style={styles.desc}>{attendanceSpot ? `기준 위치: ${attendanceSpot.name} (반경 ${attendanceSpot.radiusMeters}m)` : "❗ 위치 정보를 찾을 수 없습니다."}</Text>
+          <Text style={styles.desc}>위치 확인 없이 출근/퇴근 시간만 기록합니다.</Text>
           <Text style={styles.msg}>{message}</Text>
           {checkedIn && checkInTime && <Text style={styles.debug}>출근시간: {checkInTime}</Text>}
         </View>
@@ -1170,19 +1278,76 @@ export default function ClassDetailScreen() {
             <Text style={styles.modalTitle}>{isEditMode ? "일정 수정" : "새 일정 등록"}</Text>
             
             <ScrollView style={{ width: '100%' }} contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={styles.label}>날짜 선택: <Text style={{color:'#4F46E5', fontWeight:'bold'}}>{selectedDate || "(달력에서 선택)"}</Text></Text>
+              {!isEditMode && (
+                <View style={styles.scheduleModeControl}>
+                  <Pressable
+                    style={[styles.scheduleModeOption, scheduleMode === 'single' && styles.scheduleModeOptionActive]}
+                    onPress={() => setScheduleMode('single')}
+                  >
+                    <Text style={[styles.scheduleModeText, scheduleMode === 'single' && styles.scheduleModeTextActive]}>한 번 등록</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.scheduleModeOption, scheduleMode === 'repeat' && styles.scheduleModeOptionActive]}
+                    onPress={() => setScheduleMode('repeat')}
+                  >
+                    <Text style={[styles.scheduleModeText, scheduleMode === 'repeat' && styles.scheduleModeTextActive]}>반복 등록</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              <Text style={styles.label}>{scheduleMode === 'repeat' && !isEditMode ? '시작 기준일' : '날짜'}: <Text style={{color:'#4F46E5', fontWeight:'bold'}}>{selectedDate || "(달력에서 선택)"}</Text></Text>
               <Calendar
                 onDayPress={(day: any) => setSelectedDate(day.dateString)}
-                markedDates={{
-                  [selectedDate]: {selected: true, disableTouchEvent: true, selectedColor: 'orange'}
-                }}
+                markedDates={scheduleMarkedDates}
                 theme={{ selectedDayBackgroundColor: '#4F46E5', todayTextColor: '#4F46E5', arrowColor: '#4F46E5' }}
                 style={{ borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginBottom: 15 }}
               />
 
+              {scheduleMode === 'repeat' && !isEditMode && (
+                <View style={styles.repeatPanel}>
+                  <Text style={styles.label}>반복 요일</Text>
+                  <View style={styles.weekdayRow}>
+                    {WEEKDAY_OPTIONS.map(option => {
+                      const selected = repeatWeekdays.includes(option.value);
+                      return (
+                        <Pressable
+                          key={option.value}
+                          style={[styles.weekdayOption, selected && styles.weekdayOptionActive]}
+                          onPress={() => setRepeatWeekdays(current => selected
+                            ? current.filter(day => day !== option.value)
+                            : [...current, option.value])}
+                        >
+                          <Text style={[styles.weekdayText, selected && styles.weekdayTextActive]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={styles.label}>등록 횟수</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={repeatCount}
+                    onChangeText={setRepeatCount}
+                    placeholder="예: 8"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="number-pad"
+                    maxLength={2}
+                  />
+
+                  {recurringDates.length > 0 && (
+                    <View style={styles.repeatPreview}>
+                      <Text style={styles.repeatPreviewTitle}>총 {recurringDates.length}회 · {scheduleSession || '?'}차시부터</Text>
+                      <Text style={styles.repeatPreviewDates}>
+                        {recurringDates.slice(0, 6).join(' · ')}{recurringDates.length > 6 ? ` 외 ${recurringDates.length - 6}회` : ''}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>차시</Text>
+                  <Text style={styles.label}>{scheduleMode === 'repeat' && !isEditMode ? '시작 차시' : '차시'}</Text>
                   <TextInput 
                     style={[
                       styles.modalInput, 
@@ -1232,8 +1397,8 @@ export default function ClassDetailScreen() {
                   <Text style={styles.modalBtnTextCancel}>취소</Text>
                 </Pressable>
                 
-                <Pressable style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddSchedule}>
-                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>{isEditMode ? "수정완료" : "등록"}</Text>}
+                <Pressable disabled={saving} style={[styles.modalBtn, styles.modalBtnConfirm, saving && { opacity: 0.6 }]} onPress={handleAddSchedule}>
+                  {saving ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>{isEditMode ? "수정완료" : scheduleMode === 'repeat' ? `${recurringDates.length || 0}개 등록` : "등록"}</Text>}
                 </Pressable>
               </View>
 
@@ -1342,6 +1507,20 @@ const styles = StyleSheet.create({
   modalView: { backgroundColor: "white", borderRadius: 12, padding: 20, alignItems: "center", shadowColor: "#000", elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, color: "#1F2937" },
   modalInput: { height: 46, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingHorizontal: 12, fontSize: 14, backgroundColor: "#F9FAFB", marginBottom: 0 },
+  scheduleModeControl: { width: '100%', flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 8, padding: 3, marginBottom: 16 },
+  scheduleModeOption: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
+  scheduleModeOptionActive: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D1D5DB' },
+  scheduleModeText: { color: '#6B7280', fontSize: 13, fontWeight: '700' },
+  scheduleModeTextActive: { color: '#111827' },
+  repeatPanel: { width: '100%', backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12, marginBottom: 14 },
+  weekdayRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 4, marginBottom: 14 },
+  weekdayOption: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF' },
+  weekdayOptionActive: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' },
+  weekdayText: { color: '#4B5563', fontSize: 12, fontWeight: '700' },
+  weekdayTextActive: { color: '#FFFFFF' },
+  repeatPreview: { marginTop: 12, borderLeftWidth: 3, borderLeftColor: '#10B981', paddingLeft: 10 },
+  repeatPreviewTitle: { color: '#065F46', fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  repeatPreviewDates: { color: '#4B5563', fontSize: 12, lineHeight: 18 },
   modalBtnRow: { flexDirection: "row", gap: 10, width: "100%", marginTop: 10 },
   modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
   modalBtnCancel: { backgroundColor: "#E5E7EB" },

@@ -6,7 +6,8 @@ function doGet(e) {
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
+  var lockAcquired = lock.tryLock(10000);
+  if (!lockAcquired) return errorResponse("요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.");
 
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -129,27 +130,96 @@ function doPost(e) {
     // [기능 3] 조교 정보 시트에 데이터 추가 (Admin/Manager용)
     // ==========================================
     if (action === "add_assistant") {
-      // 1. 헤더 맵핑 (조교 정보 시트의 헤더를 찾음)
-      // sheet는 body.sheetName으로 받아온 시트("조교 정보")를 가리킴
-      
-      const newAssistantData = [
-        body.position || "",   // 직책 (CEO, 실장, 조교 등)
-        body.name || "",       // 성명
-        body.phone || "",      // 전화번호
-        body.email || "",      // gmail
-        body.role || "",       // 역할 (현장, 자료 등)
-        body.startDate || "",  // 근무 시작
-        body.account || "",    // 계좌번호
-        body.status || ""      // 비고
-      ];
+      const newEmail = String(body.email || "").trim().toLowerCase();
+      const newName = String(body.name || "").trim();
+      if (!newName || !newEmail) return errorResponse("이름과 Gmail은 필수입니다.");
 
-      // 2. 데이터 추가 (appendRow)
-      // 주의: 위 순서는 시트의 열 순서(A, B, C...)와 정확히 일치해야 합니다.
-      // A:직책, B:성명, C:전화번호, D:gmail, E:역할, F:근무 시작, G:계좌번호, H:비고
-      
+      const emailCol = colMap["gmail"];
+      if (!emailCol) return errorResponse("필수 열(gmail)이 없습니다.");
+      if (sheet.getLastRow() > 1) {
+        const emails = sheet.getRange(2, emailCol, sheet.getLastRow() - 1, 1).getValues();
+        for (let i = 0; i < emails.length; i++) {
+          if (String(emails[i][0] || "").trim().toLowerCase() === newEmail) {
+            return errorResponse("같은 Gmail로 등록된 조교가 이미 있습니다.");
+          }
+        }
+      }
+
+      const newAssistantValues = {
+        "직책": body.position || "",
+        "성명": newName,
+        "전화번호": body.phone || "",
+        "gmail": newEmail,
+        "역할": body.role || "",
+        "근무 시작": body.startDate || "",
+        "계좌번호": body.account || "",
+        "비고": body.status || ""
+      };
+      const newAssistantData = headers.map(header => newAssistantValues[String(header).trim()] || "");
       sheet.appendRow(newAssistantData);
-      
+      SpreadsheetApp.flush();
       return successResponse("조교 정보를 추가했습니다.");
+    }
+
+    // ==========================================
+    // [기능 3-1] 조교 정보 수정
+    // ==========================================
+    if (action === "update_assistant") {
+      const originalEmail = String(body.originalEmail || "").trim().toLowerCase();
+      const nextEmail = String(body.email || "").trim().toLowerCase();
+      const nextName = String(body.name || "").trim();
+      const emailCol = colMap["gmail"];
+      if (!originalEmail || !nextEmail || !nextName) return errorResponse("기존 Gmail, 이름, 새 Gmail은 필수입니다.");
+      if (!emailCol) return errorResponse("필수 열(gmail)이 없습니다.");
+
+      let targetRow = -1;
+      const assistantLastRow = sheet.getLastRow();
+      if (assistantLastRow > 1) {
+        const emails = sheet.getRange(2, emailCol, assistantLastRow - 1, 1).getValues();
+        for (let i = 0; i < emails.length; i++) {
+          const rowEmail = String(emails[i][0] || "").trim().toLowerCase();
+          if (rowEmail === originalEmail) targetRow = i + 2;
+          if (rowEmail === nextEmail && rowEmail !== originalEmail) {
+            return errorResponse("변경할 Gmail이 다른 조교에게 이미 등록되어 있습니다.");
+          }
+        }
+      }
+      if (targetRow === -1) return errorResponse("수정할 조교 정보를 찾을 수 없습니다.");
+
+      const assistantValues = {
+        "직책": body.position || "",
+        "성명": nextName,
+        "전화번호": body.phone || "",
+        "gmail": nextEmail,
+        "역할": body.role || "",
+        "근무 시작": body.startDate || "",
+        "계좌번호": body.account || "",
+        "비고": body.status || ""
+      };
+      Object.keys(assistantValues).forEach(header => {
+        if (colMap[header]) sheet.getRange(targetRow, colMap[header]).setValue(assistantValues[header]);
+      });
+
+      const permissionSheet = ss.getSheetByName("앱 권한 관리");
+      if (permissionSheet && permissionSheet.getLastRow() > 1) {
+        const permissionHeaders = permissionSheet.getRange(1, 1, 1, permissionSheet.getLastColumn()).getValues()[0];
+        const permissionColMap = {};
+        permissionHeaders.forEach((header, index) => permissionColMap[String(header).trim()] = index + 1);
+        if (permissionColMap["이메일"]) {
+          const permissionEmails = permissionSheet.getRange(2, permissionColMap["이메일"], permissionSheet.getLastRow() - 1, 1).getValues();
+          for (let i = 0; i < permissionEmails.length; i++) {
+            if (String(permissionEmails[i][0] || "").trim().toLowerCase() === originalEmail) {
+              const permissionRow = i + 2;
+              permissionSheet.getRange(permissionRow, permissionColMap["이메일"]).setValue(nextEmail);
+              if (permissionColMap["이름"]) permissionSheet.getRange(permissionRow, permissionColMap["이름"]).setValue(nextName);
+              break;
+            }
+          }
+        }
+      }
+
+      SpreadsheetApp.flush();
+      return successResponse("조교 정보를 수정했습니다.");
     }
 
     // ==========================================

@@ -493,6 +493,7 @@ export default function HomeScreen() {
             <TextInput
               style={styles.modalInput}
               placeholder="example@gmail.com"
+              placeholderTextColor="#9CA3AF"
               value={targetEmail}
               onChangeText={setTargetEmail}
               keyboardType="email-address"

@@ -1,12 +1,57 @@
 // 앱과 구글 시트(GAS) 간의 데이터 통신 유틸리티
 import { Platform } from "react-native";
 
-interface ApiResponse<T = any> {
+export interface ApiResponse<T = any> {
   ok: boolean;
   data?: T;
   message?: string;
   error?: string;
   webOpaque?: boolean;
+}
+
+export type AttendanceStatus = {
+  checkedIn: boolean;
+  classId?: string;
+  className?: string;
+  email?: string;
+  workDate?: string;
+  startTime?: string;
+};
+
+export async function getAttendanceStatus(
+  scriptUrl: string,
+  sheetName: string,
+  email: string,
+): Promise<ApiResponse<AttendanceStatus>> {
+  try {
+    const query = [
+      "action=attendance_status",
+      `sheetName=${encodeURIComponent(sheetName)}`,
+      `email=${encodeURIComponent(email.trim().toLowerCase())}`,
+      `_=${Date.now()}`,
+    ].join("&");
+
+    const res = await fetch(`${scriptUrl}?${query}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      ...(Platform.OS === "web" ? { cache: "no-store" } : {}),
+    });
+    const text = await res.text();
+
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 100)}` };
+    }
+
+    const json = JSON.parse(text);
+    if (json.result === "error" || json.error) {
+      return { ok: false, error: json.error || json.message || "상태 조회 실패" };
+    }
+
+    return { ok: true, data: json.attendance || { checkedIn: false } };
+  } catch (err: any) {
+    console.error("[Attendance Status Error]", err);
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
