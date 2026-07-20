@@ -4,6 +4,11 @@ import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert, Scrol
 import { useRouter } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import * as Application from 'expo-application';
+import AssistantFormModal, {
+  AssistantFormValues,
+  EMPTY_ASSISTANT_FORM,
+  normalizeAssistantFormValues,
+} from '../../components/AssistantFormModal';
 
 // Firebase & Auth
 import auth from '@react-native-firebase/auth';
@@ -76,16 +81,7 @@ export default function HomeScreen() {
   const [targetRole, setTargetRole] = useState<"Admin" | "Manager">("Manager");
   const [processing, setProcessing] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [newAssistant, setNewAssistant] = useState({
-    position: "조교", // 기본값
-    name: "",
-    phone: "",
-    email: "",
-    role: "현장",
-    startDate: "",
-    account: "",
-    status: "현역"
-  });
+  const [newAssistant, setNewAssistant] = useState<AssistantFormValues>({ ...EMPTY_ASSISTANT_FORM });
 
   // 웹/앱 호환 알림 함수
   const showAlert = (title: string, message: string) => {
@@ -325,9 +321,19 @@ export default function HomeScreen() {
     }
   };
 
+  const openAddAssistantModal = () => {
+    setNewAssistant({ ...EMPTY_ASSISTANT_FORM });
+    setAddModalVisible(true);
+  };
+
   const handleAddAssistant = async () => {
-    if (!newAssistant.name || !newAssistant.email) {
+    const normalized = normalizeAssistantFormValues(newAssistant);
+    if (!normalized.name || !normalized.email) {
       showAlert("입력 오류", "이름과 이메일은 필수입니다.");
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(normalized.email)) {
+      showAlert("입력 오류", "올바른 이메일 주소를 입력해주세요.");
       return;
     }
 
@@ -335,14 +341,13 @@ export default function HomeScreen() {
     try {
       const res = await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.ASSISTANT_INFO, {
         action: "add_assistant",
-        ...newAssistant
+        ...normalized,
       });
 
       if (res.ok) {
-        showAlert("성공", `${newAssistant.name} 조교 정보를 추가했습니다.`);
+        showAlert("성공", `${normalized.name} 조교 정보를 추가했습니다.`);
         setAddModalVisible(false);
-        // 입력창 초기화
-        setNewAssistant({ position: "조교", name: "", phone: "", email: "", role: "현장", startDate: "", account: "", status: "현역" });
+        setNewAssistant({ ...EMPTY_ASSISTANT_FORM });
       } else {
         showAlert("실패", res.error || "추가 실패");
       }
@@ -354,7 +359,7 @@ export default function HomeScreen() {
     }
   };
 
-  const updateNewAssistant = (key: string, value: string) => {
+  const updateNewAssistant = (key: keyof AssistantFormValues, value: string) => {
     setNewAssistant(prev => ({ ...prev, [key]: value }));
   };
 
@@ -404,7 +409,7 @@ export default function HomeScreen() {
             {(isAdmin || isManager) && (
               <TouchableOpacity 
                 style={[styles.reqBtnManager, { marginTop: 10, backgroundColor: '#10B981' }]} 
-                onPress={() => setAddModalVisible(true)}
+                onPress={openAddAssistantModal}
               >
                 <Text style={styles.reqBtnText}>+ 조교 정보 시트에 추가</Text>
               </TouchableOpacity>
@@ -524,38 +529,15 @@ export default function HomeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-      <Modal
-        animationType="slide"
-        transparent={true}
+      <AssistantFormModal
         visible={addModalVisible}
-        onRequestClose={() => setAddModalVisible(false)}
-      >
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
-          <View style={[styles.modalView, { width: '90%' }]}>
-            <Text style={styles.modalTitle}>새 조교 등록</Text>
-            
-            <ScrollView style={{ width: '100%', maxHeight: 400 }}>
-              <InputRow label="이름 (필수)" val={newAssistant.name} onChange={v => updateNewAssistant('name', v)} />
-              <InputRow label="Gmail (예: example@gmail.com)" val={newAssistant.email} onChange={v => updateNewAssistant('email', v)} type="email-address" />
-              <InputRow label="전화번호 (예: 010-1234-5678)" val={newAssistant.phone} onChange={v => updateNewAssistant('phone', v)} type="phone-pad" />
-              <InputRow label="직책 (예: 조교)" val={newAssistant.position} onChange={v => updateNewAssistant('position', v)} />
-              <InputRow label="역할 (예: 현장, 자료)" val={newAssistant.role} onChange={v => updateNewAssistant('role', v)} />
-              <InputRow label="근무 시작 (예: 2025년 1학기)" val={newAssistant.startDate} onChange={v => updateNewAssistant('startDate', v)} />
-              <InputRow label="계좌번호" val={newAssistant.account} onChange={v => updateNewAssistant('account', v)} />
-              <InputRow label="비고 (예: 현역)" val={newAssistant.status} onChange={v => updateNewAssistant('status', v)} />
-            </ScrollView>
-
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setAddModalVisible(false)}>
-                <Text style={styles.modalBtnTextCancel}>취소</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleAddAssistant}>
-                 {processing ? <ActivityIndicator color="white" /> : <Text style={styles.modalBtnTextConfirm}>추가</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        title="새 조교 등록"
+        values={newAssistant}
+        saving={processing}
+        onChange={updateNewAssistant}
+        onCancel={() => setAddModalVisible(false)}
+        onSubmit={handleAddAssistant}
+      />
     </View>
   );
 }
@@ -564,24 +546,6 @@ const InfoItem = ({ label, value }: { label: string, value: string }) => (
   <View style={{ flex: 1, alignItems: 'center' }}>
     <Text style={styles.label}>{label}</Text>
     <Text style={styles.value} numberOfLines={1}>{value}</Text>
-  </View>
-);
-
-const InputRow = ({ label, val, onChange, type = 'default' }: any) => (
-  <View style={{ marginBottom: 10 }}>
-    <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>{label}</Text>
-    <TextInput
-      style={[
-        styles.modalInput,
-        { color: '#111827' }, // 입력된 글자는 진한 검은색
-        !val && { fontStyle: 'italic' } // ⭐️ 값이 없으면(Placeholder 상태면) 기울임꼴
-      ]}
-      value={val}
-      onChangeText={onChange}
-      keyboardType={type}
-      placeholder={label}
-      placeholderTextColor="#9CA3AF" // ⭐️ Placeholder 글자색은 회색
-    />
   </View>
 );
 

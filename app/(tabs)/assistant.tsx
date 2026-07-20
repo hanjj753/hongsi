@@ -1,8 +1,13 @@
 // [조교] 탭
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert, Modal, Platform, TextInput, KeyboardAvoidingView } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert, Modal, Platform, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Picker } from '@react-native-picker/picker';
+import AssistantFormModal, {
+  AssistantFormValues,
+  EMPTY_ASSISTANT_FORM,
+  normalizeAssistantFormValues,
+} from "../../components/AssistantFormModal";
 
 // Config & Utils
 import { fetchSheetData } from "../../utils/googleSheet_csv";
@@ -24,28 +29,6 @@ type Assistant = {
   startDate: string;
   account: string;
   isInactive: boolean;
-};
-
-type AssistantForm = {
-  position: string;
-  name: string;
-  phone: string;
-  email: string;
-  role: string;
-  startDate: string;
-  account: string;
-  status: string;
-};
-
-const EMPTY_ASSISTANT: AssistantForm = {
-  position: "조교",
-  name: "",
-  phone: "",
-  email: "",
-  role: "현장",
-  startDate: "",
-  account: "",
-  status: "현역",
 };
 
 type WorkRow = {
@@ -106,26 +89,6 @@ function secondsToHMS(totalSec: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-const AssistantInput = ({ label, value, onChange, keyboardType = 'default' }: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  keyboardType?: 'default' | 'email-address' | 'phone-pad';
-}) => (
-  <View style={{ marginBottom: 10 }}>
-    <Text style={styles.editLabel}>{label}</Text>
-    <TextInput
-      style={styles.editInput}
-      value={value}
-      onChangeText={onChange}
-      keyboardType={keyboardType}
-      placeholder={label}
-      placeholderTextColor="#9CA3AF"
-      autoCapitalize={keyboardType === 'email-address' ? 'none' : 'sentences'}
-    />
-  </View>
-);
-
 export default function AssistantScreen() {
   const [allData, setAllData] = useState<Assistant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,7 +106,7 @@ export default function AssistantScreen() {
 
   const [assistantModalVisible, setAssistantModalVisible] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
-  const [assistantForm, setAssistantForm] = useState<AssistantForm>(EMPTY_ASSISTANT);
+  const [assistantForm, setAssistantForm] = useState<AssistantFormValues>({ ...EMPTY_ASSISTANT_FORM });
   const [savingAssistant, setSavingAssistant] = useState(false);
 
   // ✅ 근무 기록 모달 상태
@@ -170,35 +133,33 @@ export default function AssistantScreen() {
     }
   };
 
-  const assistantFromForm = (form: AssistantForm): Assistant => {
-    const position = form.position.trim();
-    const role = form.role.trim();
-    const status = form.status.trim();
+  const assistantFromForm = (form: AssistantFormValues): Assistant => {
+    const normalized = normalizeAssistantFormValues(form);
     return {
-      name: form.name.trim(),
-      rawPosition: position,
-      positions: position.split(',').map(value => value.trim()).filter(Boolean),
-      phone: form.phone.trim(),
-      email: form.email.trim().toLowerCase(),
-      roles: role.split(',').map(value => value.trim()).filter(Boolean),
-      status,
-      startDate: form.startDate.trim(),
-      account: form.account.trim(),
-      isInactive: status.includes("비근무"),
+      name: normalized.name,
+      rawPosition: normalized.position,
+      positions: [normalized.position],
+      phone: normalized.phone,
+      email: normalized.email,
+      roles: normalized.role.split(',').map(value => value.trim()).filter(Boolean),
+      status: normalized.status,
+      startDate: normalized.startDate,
+      account: normalized.account,
+      isInactive: normalized.status === "비근무",
     };
   };
 
   const openAddAssistantModal = () => {
     if (!isAdmin && !isManager) return;
     setEditingAssistant(null);
-    setAssistantForm({ ...EMPTY_ASSISTANT });
+    setAssistantForm({ ...EMPTY_ASSISTANT_FORM });
     setAssistantModalVisible(true);
   };
 
   const openEditAssistantModal = (assistant: Assistant) => {
     if (!isAdmin && !isManager) return;
     setEditingAssistant(assistant);
-    setAssistantForm({
+    setAssistantForm(normalizeAssistantFormValues({
       position: assistant.rawPosition,
       name: assistant.name,
       phone: assistant.phone,
@@ -207,11 +168,11 @@ export default function AssistantScreen() {
       startDate: assistant.startDate,
       account: assistant.account,
       status: assistant.status,
-    });
+    }));
     setAssistantModalVisible(true);
   };
 
-  const updateAssistantForm = (key: keyof AssistantForm, value: string) => {
+  const updateAssistantForm = (key: keyof AssistantFormValues, value: string) => {
     setAssistantForm(current => ({ ...current, [key]: value }));
   };
 
@@ -837,43 +798,15 @@ export default function AssistantScreen() {
         </View>
       </ScrollView>
 
-      <Modal
+      <AssistantFormModal
         visible={assistantModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setAssistantModalVisible(false)}
-      >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalView}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingAssistant ? "조교 정보 수정" : "새 조교 등록"}</Text>
-              <TouchableOpacity style={styles.headerIconBtn} onPress={() => setAssistantModalVisible(false)} accessibilityLabel="닫기">
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.assistantFormScroll} contentContainerStyle={{ paddingBottom: 4 }}>
-              <AssistantInput label="이름 (필수)" value={assistantForm.name} onChange={value => updateAssistantForm('name', value)} />
-              <AssistantInput label="Gmail (필수)" value={assistantForm.email} onChange={value => updateAssistantForm('email', value)} keyboardType="email-address" />
-              <AssistantInput label="전화번호" value={assistantForm.phone} onChange={value => updateAssistantForm('phone', value)} keyboardType="phone-pad" />
-              <AssistantInput label="직책" value={assistantForm.position} onChange={value => updateAssistantForm('position', value)} />
-              <AssistantInput label="역할 (쉼표로 구분)" value={assistantForm.role} onChange={value => updateAssistantForm('role', value)} />
-              <AssistantInput label="근무 시작" value={assistantForm.startDate} onChange={value => updateAssistantForm('startDate', value)} />
-              <AssistantInput label="계좌번호" value={assistantForm.account} onChange={value => updateAssistantForm('account', value)} />
-              <AssistantInput label="비고" value={assistantForm.status} onChange={value => updateAssistantForm('status', value)} />
-            </ScrollView>
-
-            <View style={styles.modalBtnRow}>
-              <TouchableOpacity disabled={savingAssistant} style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setAssistantModalVisible(false)}>
-                <Text style={styles.modalBtnTextCancel}>취소</Text>
-              </TouchableOpacity>
-              <TouchableOpacity disabled={savingAssistant} style={[styles.modalBtn, styles.modalBtnConfirm]} onPress={handleSaveAssistant}>
-                {savingAssistant ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalBtnTextConfirm}>저장</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        title={editingAssistant ? "조교 정보 수정" : "새 조교 등록"}
+        values={assistantForm}
+        saving={savingAssistant}
+        onChange={updateAssistantForm}
+        onCancel={() => setAssistantModalVisible(false)}
+        onSubmit={handleSaveAssistant}
+      />
 
       {/* ✅ 근무 기록 모달 */}
       <Modal visible={logModalVisible} animationType="slide" transparent onRequestClose={() => setLogModalVisible(false)}>
@@ -1109,7 +1042,6 @@ const styles = StyleSheet.create({
   modalHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerIconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   modalTitle: { fontSize: 18, fontWeight: "bold", color: "#111" },
-  assistantFormScroll: { width: '100%', maxHeight: 480 },
   emptyLog: { padding: 30, alignItems: 'center' },
   emptyLogText: { color: '#999' },
   
