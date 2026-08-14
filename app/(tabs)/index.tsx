@@ -53,6 +53,19 @@ function durationToSeconds(s: string): number {
   return 0;
 }
 
+function calculateDuration(start: string, end: string): string {
+  const startParts = String(start || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  const endParts = String(end || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!startParts || !endParts) return "";
+
+  const startMinutes = Number(startParts[1]) * 60 + Number(startParts[2]);
+  let endMinutes = Number(endParts[1]) * 60 + Number(endParts[2]);
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+
+  const diff = endMinutes - startMinutes;
+  return `${String(Math.floor(diff / 60)).padStart(2, '0')}:${String(diff % 60).padStart(2, '0')}`;
+}
+
 function secondsToHMS(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
@@ -196,15 +209,20 @@ export default function HomeScreen() {
         const rowEmail = (r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ||  "").trim().toLowerCase();
         return rowEmail === myEmail;
       })
-      .map((r: any) => ({
-        date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
-        shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
-        start: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim(),
-        end: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim(),
-        work: String(r["근무 시간"] ?? "").trim(), 
-        email: myEmail,
-        _dt: parseSheetDate(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]) ?? undefined
-      }))
+      .map((r: any) => {
+        const start = String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim();
+        const end = String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim();
+        const savedDuration = String(r[ATTENDANCE_LOG_HEADERS.WORK_DURATION] ?? "").trim();
+        return {
+          date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
+          shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
+          start,
+          end,
+          work: savedDuration || calculateDuration(start, end),
+          email: myEmail,
+          _dt: parseSheetDate(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]) ?? undefined
+        };
+      })
       .filter(r => r._dt)
       .sort((a, b) => (b._dt!.getTime() - a._dt!.getTime()));
 

@@ -16,6 +16,35 @@ function sheetValueText_(value, pattern) {
   return String(value || "").replace(/^'/, "").trim();
 }
 
+function hmToMinutes_(value) {
+  var match = String(value || "").replace(/^'/, "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function minutesToHm_(minutes) {
+  var safeMinutes = Math.max(0, Math.floor(minutes));
+  var hours = Math.floor(safeMinutes / 60);
+  var mins = safeMinutes % 60;
+  return String(hours).padStart(2, "0") + ":" + String(mins).padStart(2, "0");
+}
+
+function durationHm_(start, end) {
+  var startMinutes = hmToMinutes_(start);
+  var endMinutes = hmToMinutes_(end);
+  if (startMinutes === null || endMinutes === null) return "";
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  return minutesToHm_(endMinutes - startMinutes);
+}
+
+function ensureHeaderColumn1_(sheet, colMap, headerName) {
+  if (colMap[headerName]) return colMap[headerName];
+  var column = sheet.getLastColumn() + 1;
+  sheet.getRange(1, column).setValue(headerName);
+  colMap[headerName] = column;
+  return column;
+}
+
 function findActiveAttendance_(sheet, email) {
   var targetEmail = normalizeEmail_(email);
   if (!targetEmail || sheet.getLastRow() < 2) return null;
@@ -211,6 +240,14 @@ function doPost(e) {
       var addHeaders = addSheet.getRange(1, 1, 1, addSheet.getLastColumn()).getValues()[0];
       var addColMap = {};
       addHeaders.forEach(function(header, index) { addColMap[String(header).trim()] = index; });
+      if (addColMap["근무 시간"] === undefined) {
+        addSheet.getRange(1, addSheet.getLastColumn() + 1).setValue("근무 시간");
+        addHeaders.push("근무 시간");
+        addColMap["근무 시간"] = addHeaders.length - 1;
+      }
+      if (!String(addRecord["근무 시간"] || "").trim()) {
+        addRecord["근무 시간"] = durationHm_(addStart, addEnd);
+      }
       var addData = addSheet.getLastRow() < 2
         ? []
         : addSheet.getRange(2, 1, addSheet.getLastRow() - 1, addSheet.getLastColumn()).getValues();
@@ -325,10 +362,16 @@ function doPost(e) {
       }
 
       if (foundRow !== -1) {
+        if (colMap["근무 시간"] === undefined) {
+          var durationColumn = sheet.getLastColumn() + 1;
+          sheet.getRange(1, durationColumn).setValue("근무 시간");
+          colMap["근무 시간"] = durationColumn - 1;
+        }
+        var updatedDuration = String(params.newDuration || "").trim() || durationHm_(params.newStart, params.newEnd);
         // ✅ [수정] 값 업데이트 시 ' 붙여서 텍스트 강제
         if (colMap["출근 시간"] !== undefined) sheet.getRange(foundRow, colMap["출근 시간"] + 1).setValue("'" + params.newStart);
         if (colMap["퇴근 시간"] !== undefined) sheet.getRange(foundRow, colMap["퇴근 시간"] + 1).setValue("'" + params.newEnd);
-        if (colMap["근무 시간"] !== undefined) sheet.getRange(foundRow, colMap["근무 시간"] + 1).setValue("'" + params.newDuration);
+        if (colMap["근무 시간"] !== undefined) sheet.getRange(foundRow, colMap["근무 시간"] + 1).setValue("'" + updatedDuration);
         
         // 상태 변경
         if (colMap["상태"] !== undefined) sheet.getRange(foundRow, colMap["상태"] + 1).setValue("퇴근");
@@ -444,9 +487,13 @@ function doPost(e) {
       }
 
       if (foundRowIndexes.length > 0) {
+        var durationCol = ensureHeaderColumn1_(sheet, colMap, "근무 시간");
         foundRowIndexes.forEach(function(rowIndex) {
-          if (colMap["퇴근 시간"]) sheet.getRange(rowIndex, colMap["퇴근 시간"]).setValue("'" + params["퇴근 시간"]);
-          if (colMap["근무 시간"]) sheet.getRange(rowIndex, colMap["근무 시간"]).setValue("'" + params["근무 시간"]);
+          var endHm = String(params["퇴근 시간"] || "").trim();
+          var startHm = colMap["출근 시간"] ? sheetValueText_(sheet.getRange(rowIndex, colMap["출근 시간"]).getValue(), "HH:mm") : "";
+          var durationHm = String(params["근무 시간"] || "").trim() || durationHm_(startHm, endHm);
+          if (colMap["퇴근 시간"]) sheet.getRange(rowIndex, colMap["퇴근 시간"]).setValue("'" + endHm);
+          sheet.getRange(rowIndex, durationCol).setValue("'" + durationHm);
           sheet.getRange(rowIndex, colMap["상태"]).setValue("퇴근");
         });
         SpreadsheetApp.flush();

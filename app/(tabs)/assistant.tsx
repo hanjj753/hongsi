@@ -313,7 +313,7 @@ export default function AssistantScreen() {
           [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: targetEmail,
           [ATTENDANCE_LOG_HEADERS.ATTENDANCE_START]: normalizedStart,
           [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: normalizedEnd,
-          "근무 시간": newDuration,
+          [ATTENDANCE_LOG_HEADERS.WORK_DURATION]: newDuration,
           [ATTENDANCE_LOG_HEADERS.STATUS]: "퇴근",
           [ATTENDANCE_LOG_HEADERS.WORKER_LOCATION]: "",
           [ATTENDANCE_LOG_HEADERS.NOTE]: "관리자 직접 추가"
@@ -484,16 +484,21 @@ export default function AssistantScreen() {
           const rowEmail = (r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] || r["Email"] || "").trim().toLowerCase();
           return rowEmail === targetEmail;
         })
-        .map((r: any) => ({
-          date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
-          shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
-          day: String(r[ATTENDANCE_LOG_HEADERS.DAY] ?? "").trim(),
-          start: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim(),
-          end: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim(),
-          work: String(r["근무 시간"] ?? "").trim(),
-          email: targetEmail,
-          _dt: parseSheetDate(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]) ?? undefined
-        }));
+        .map((r: any) => {
+          const start = String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_START] ?? "").trim();
+          const end = String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_END] ?? "").trim();
+          const savedDuration = String(r[ATTENDANCE_LOG_HEADERS.WORK_DURATION] ?? "").trim();
+          return {
+            date: String(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE] ?? "").trim(),
+            shift: String(r[ATTENDANCE_LOG_HEADERS.CLASS_NAME] ?? "").trim(),
+            day: String(r[ATTENDANCE_LOG_HEADERS.DAY] ?? "").trim(),
+            start,
+            end,
+            work: savedDuration || calculateDuration(start, end),
+            email: targetEmail,
+            _dt: parseSheetDate(r[ATTENDANCE_LOG_HEADERS.ATTENDANCE_DATE]) ?? undefined
+          };
+        });
 
       setLogRows(userRows);
 

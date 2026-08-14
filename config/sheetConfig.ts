@@ -80,6 +80,7 @@ export const ATTENDANCE_LOG_HEADERS = {
   WORKER_EMAIL: "출근자 Email",
   ATTENDANCE_START: "출근 시간",
   ATTENDANCE_END: "퇴근 시간",
+  WORK_DURATION: "근무 시간",
   STATUS: "상태",
   WORKER_LOCATION: "위치",
   NOTE: "비고",

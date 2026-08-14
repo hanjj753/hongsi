@@ -425,7 +425,7 @@ export default function ClassDetailScreen() {
         [ATTENDANCE_LOG_HEADERS.CLASS_ID]: targetId,
         [ATTENDANCE_LOG_HEADERS.WORKER_EMAIL]: userEmail!.trim().toLowerCase(),
         [ATTENDANCE_LOG_HEADERS.ATTENDANCE_END]: endTime,
-        "근무 시간": workHm,
+        [ATTENDANCE_LOG_HEADERS.WORK_DURATION]: workHm,
       };
 
       const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.ATTENDANCE, payload);
