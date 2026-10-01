@@ -1,6 +1,7 @@
 // [수업] 탭
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking, TextInput, Alert } from "react-native";
+import type { ViewStyle } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Picker } from "@react-native-picker/picker";
@@ -12,19 +13,28 @@ import { postSheetData } from "../../utils/sheetApi";
 import { getCurrentUserEmail } from "../../utils/currentUser";
 import { CSV_URLS, API_URLS, SHEET_NAMES, CLASSES_HEADERS, POSITIONS_HEADERS, PERMISSION_HEADERS } from "../../config/sheetConfig";
 import { getActiveSession, ActiveSession } from "../../utils/activeSession";
+import { isSupabaseDataSource } from "../../config/dataSource";
+import { getSupabaseClasses, getSupabaseLocations, saveSupabaseLocation } from "../../lib/classData";
+import { useAppAccess } from "../../contexts/AppAccessContext";
+import { TermClassManager } from "../../components/TermClassManager";
+import { AllStudentRecords } from "../../components/AllStudentRecords";
 
 export default function ClassScreen() {
   const router = useRouter();
+  const { access } = useAppAccess();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [didAutoPick, setDidAutoPick] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState<string>("ALL");
 
   // 권한 및 관리 상태
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isManager, setIsManager] = useState(false);
+  const [legacyIsAdmin, setLegacyIsAdmin] = useState(false);
+  const [legacyIsManager, setLegacyIsManager] = useState(false);
+  const isAdmin = isSupabaseDataSource ? access?.app_role === 'admin' : legacyIsAdmin;
+  const isManager = isSupabaseDataSource ? access?.app_role === 'manager' : legacyIsManager;
 
   // 위치 정보 State
   const [positions, setPositions] = useState<any[]>([]);
@@ -34,14 +44,27 @@ export default function ClassScreen() {
   const [editPlace, setEditPlace] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [editNote, setEditNote] = useState("");
+  const [editLocationId, setEditLocationId] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
   useFocusEffect(useCallback(() => {
+    if (isSupabaseDataSource) {
+      setActiveSession(null);
+      return;
+    }
     (async () => { setActiveSession(await getActiveSession()); })();
   }, []));
 
   const load = useCallback(async () => {
     try {
+      setLoadError("");
+      if (isSupabaseDataSource) {
+        const [cData, pData] = await Promise.all([getSupabaseClasses(), getSupabaseLocations()]);
+        setRows(cData);
+        setPositions(pData);
+        return;
+      }
+
       const [cData, pData, permData] = await Promise.all([
         fetchSheetData(`${CSV_URLS.CLASSES}&t=${Date.now()}`),
         fetchSheetData(`${CSV_URLS.POSITIONS}&t=${Date.now()}`),
@@ -54,17 +77,18 @@ export default function ClassScreen() {
       // 권한 체크
       const myEmail = getCurrentUserEmail();
       if (myEmail && Array.isArray(permData)) {
-        const myRecord = permData.find((r: any) => 
+        const myRecord = permData.find((r: any) =>
           String(r[PERMISSION_HEADERS.EMAIL] || "").trim().toLowerCase() === myEmail.trim().toLowerCase()
         );
         if (myRecord) {
           const role = String(myRecord[PERMISSION_HEADERS.ROLE] || "").trim();
-          if (role === 'Admin') setIsAdmin(true);
-          if (role === 'Manager') setIsManager(true);
+          setLegacyIsAdmin(role === 'Admin');
+          setLegacyIsManager(role === 'Manager');
         }
       }
     } catch (e: any) {
       console.error(e);
+      setLoadError(e?.message || "수업 정보를 불러오지 못했습니다.");
     }
   }, []);
 
@@ -74,7 +98,10 @@ export default function ClassScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    try { await load(); setActiveSession(await getActiveSession()); } finally { setRefreshing(false); }
+    try {
+      await load();
+      setActiveSession(isSupabaseDataSource ? null : await getActiveSession());
+    } finally { setRefreshing(false); }
   };
 
   const showAlert = (title: string, message: string) => {
@@ -96,6 +123,26 @@ export default function ClassScreen() {
 
     setSaving(true);
     try {
+      if (isSupabaseDataSource) {
+        const coordinates = editLocation.split(',').map((part) => Number(part.trim()));
+        if (coordinates.length !== 2 || coordinates.some((value) => !Number.isFinite(value))
+          || coordinates[0] < -90 || coordinates[0] > 90 || coordinates[1] < -180 || coordinates[1] > 180) {
+          showAlert("입력 확인", "좌표를 '위도, 경도' 형식으로 입력해 주세요.");
+          return;
+        }
+        await saveSupabaseLocation({
+          id: editLocationId,
+          name: editPlace.trim(),
+          latitude: coordinates[0],
+          longitude: coordinates[1],
+          notes: editNote.trim(),
+        });
+        showAlert("성공", isEditMode ? "수정되었습니다." : "추가되었습니다.");
+        setEditModalVisible(false);
+        await load();
+        return;
+      }
+
       const action = isEditMode ? "update_location" : "add_location";
       const payload = {
         action,
@@ -107,15 +154,15 @@ export default function ClassScreen() {
       const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.POSITIONS, payload);
 
       if (res.ok) {
-        showAlert("성공", isEditMode ? "수정되었습니다." : "추가되었습니다."); 
+        showAlert("성공", isEditMode ? "수정되었습니다." : "추가되었습니다.");
         setEditModalVisible(false);
         load();
       } else {
-        showAlert("실패", res.error || "문제가 발생했습니다."); 
+        showAlert("실패", res.error || "문제가 발생했습니다.");
       }
     } catch (e) {
       console.error(e);
-      showAlert("오류", "전송 중 문제가 발생했습니다."); 
+      showAlert("오류", "전송 중 문제가 발생했습니다.");
     } finally {
       setSaving(false);
     }
@@ -123,6 +170,10 @@ export default function ClassScreen() {
 
   // 장소 삭제 핸들러
   const handleDeleteLocation = (placeName: string) => {
+    if (isSupabaseDataSource) {
+      showAlert("안내", "DB 장소 삭제는 참조 중인 수업을 보호하기 위해 아직 지원하지 않습니다.");
+      return;
+    }
     const processDelete = async () => {
       setSaving(true);
       try {
@@ -137,11 +188,11 @@ export default function ClassScreen() {
         } else {
           showAlert("실패", res.error || "문제가 발생했습니다.");
         }
-      } catch (e) { 
+      } catch (e) {
         console.error(e);
         showAlert("오류", "삭제 중 오류가 발생했습니다.");
-      } finally { 
-        setSaving(false); 
+      } finally {
+        setSaving(false);
       }
     };
 
@@ -162,11 +213,13 @@ export default function ClassScreen() {
   const openEditModal = (item?: any) => {
     if (item) {
       setIsEditMode(true);
+      setEditLocationId(item.__dbId ? String(item.__dbId) : undefined);
       setEditPlace(String(item[POSITIONS_HEADERS.PLACE] || ""));
       setEditLocation(String(item[POSITIONS_HEADERS.PLACE_LOCATION] || ""));
       setEditNote(String(item[POSITIONS_HEADERS.NOTE] || ""));
     } else {
       setIsEditMode(false);
+      setEditLocationId(undefined);
       setEditPlace("");
       setEditLocation("");
       setEditNote("");
@@ -211,7 +264,7 @@ export default function ClassScreen() {
   // 지도 앱 열기 핸들러
   const openMap = (placeName: string, coordStr?: string) => {
     let lat = "", lng = "";
-    
+
     // 좌표 파싱
     if (coordStr && coordStr.includes(",")) {
       const parts = coordStr.split(",").map(s => s.trim());
@@ -225,8 +278,8 @@ export default function ClassScreen() {
     if (Platform.OS === 'web') {
       const query = (lat && lng) ? `${lat},${lng}` : placeName;
       const webUrl = `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
-      
-      window.open(webUrl, '_blank'); 
+
+      window.open(webUrl, '_blank');
       setMapModalVisible(false);
       return;
     }
@@ -243,7 +296,7 @@ export default function ClassScreen() {
       const fallbackUrl = `https://map.naver.com/p/search/${encodeURIComponent(query)}`;
       Linking.openURL(fallbackUrl);
     });
-    
+
     setMapModalVisible(false);
   };
 
@@ -252,24 +305,42 @@ export default function ClassScreen() {
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-        
+
         {/* 헤더 영역 */}
         <View style={styles.headerRow}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <FontAwesome5 name="chalkboard" size={24} color="#333" />
             <Text style={styles.title}>수업 목록</Text>
           </View>
-          
-          <Pressable 
-            style={({pressed}) => [styles.mapBtn, pressed && { opacity: 0.7 }]} 
-            onPress={() => setMapModalVisible(true)}
-          >
-            <FontAwesome5 name="map-marked-alt" size={20} color="#4F46E5" />
-            <Text style={styles.mapBtnText}>위치 보기</Text>
-          </Pressable>
+
+          <View style={styles.headerActions}>
+            {isSupabaseDataSource && <AllStudentRecords />}
+            {isSupabaseDataSource && (isAdmin || isManager) && <TermClassManager onChanged={load} />}
+            <Pressable
+              style={({pressed}) => [styles.mapBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => setMapModalVisible(true)}
+            >
+              <FontAwesome5 name="map-marked-alt" size={20} color="#4F46E5" />
+              <Text style={styles.mapBtnText}>위치 보기</Text>
+            </Pressable>
+          </View>
         </View>
 
-        {activeSession && (
+        {isSupabaseDataSource && (
+          <View style={styles.sourceBanner}>
+            <Text style={styles.sourceBannerTitle}>Supabase 개발 데이터</Text>
+            <Text style={styles.sourceBannerText}>이 화면의 수업과 위치는 개발 DB에서 불러옵니다.</Text>
+          </View>
+        )}
+
+        {!!loadError && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{loadError}</Text>
+            <Pressable onPress={() => void onRefresh()}><Text style={styles.retryText}>다시 불러오기</Text></Pressable>
+          </View>
+        )}
+
+        {!isSupabaseDataSource && activeSession && (
           <Pressable style={styles.openShiftBanner} onPress={() => router.push({ pathname: "/class/[id]", params: { id: activeSession.classId } })}>
             <Text style={styles.openShiftTitle}>현재 출근 중</Text>
             <Text style={styles.openShiftText}>{activeSession.className} · {activeSession.startHm} 출근</Text>
@@ -295,12 +366,18 @@ export default function ClassScreen() {
           </View>
         </View>
 
+        {!loadError && filteredRows.length === 0 && (
+          <Text style={styles.emptyClasses}>등록된 수업이 없습니다. Supabase에서 수업을 먼저 입력해 주세요.</Text>
+        )}
+
         {filteredRows.map((r, index) => {
           const id = String(r[CLASSES_HEADERS.CLASS_ID] ?? "");
           const school = String(r[CLASSES_HEADERS.SCHOOL] ?? "").trim();
           const subject = String(r[CLASSES_HEADERS.SUBJECT] ?? "").trim();
           const day = String(r[CLASSES_HEADERS.DAY] ?? "").trim();
-          const header = (school && subject) ? `${school} ${subject} ${day}` : (school || subject || "수업");
+          const header = isSupabaseDataSource && r.__classLabel
+            ? String(r.__classLabel)
+            : (school && subject) ? `${school} ${subject} ${day}` : (school || subject || "수업");
 
           const place = String(r[CLASSES_HEADERS.PLACE] ?? "").trim();
           const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();
@@ -345,8 +422,8 @@ export default function ClassScreen() {
               {positions.length === 0 ? <Text style={styles.emptyText}>등록된 위치 정보가 없습니다.</Text> :
                 positions.map((pos, idx) => {
                   const name = String(pos[POSITIONS_HEADERS.PLACE] || "");
-                  const coord = String(pos[POSITIONS_HEADERS.PLACE_LOCATION] || ""); 
-                  const note = String(pos[POSITIONS_HEADERS.NOTE] || ""); 
+                  const coord = String(pos[POSITIONS_HEADERS.PLACE_LOCATION] || "");
+                  const note = String(pos[POSITIONS_HEADERS.NOTE] || "");
                   if (!name) return null;
                   return (
                     <View key={idx} style={styles.locationItemRow}>
@@ -375,16 +452,16 @@ export default function ClassScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxHeight: '80%' }]}>
             <Text style={styles.modalTitle}>{isEditMode ? "장소 정보 수정" : "새 장소 추가"}</Text>
-            
+
             <Text style={styles.editLabel}>장소명 (식별자)</Text>
-            <TextInput 
-              style={[styles.editInput, isEditMode && styles.readOnlyInput]} 
+            <TextInput
+              style={[styles.editInput, isEditMode && styles.readOnlyInput]}
               value={editPlace} onChangeText={setEditPlace} editable={!isEditMode} placeholder="예: 상아 본관" placeholderTextColor="#9CA3AF"
             />
-            
+
             <Text style={styles.editLabel}>좌표 (위도, 경도)</Text>
             <TextInput style={styles.editInput} value={editLocation} onChangeText={setEditLocation} placeholder="37.123, 127.123" placeholderTextColor="#9CA3AF"/>
-            
+
             <Text style={styles.editLabel}>비고</Text>
             <TextInput style={styles.editInput} value={editNote} onChangeText={setEditNote} placeholder="예: 3층" placeholderTextColor="#9CA3AF"/>
 
@@ -397,7 +474,7 @@ export default function ClassScreen() {
               </Pressable>
             </View>
 
-            {isEditMode && (
+            {isEditMode && !isSupabaseDataSource && (
               <Pressable onPress={() => handleDeleteLocation(editPlace)} style={{ marginTop: 15, alignSelf: 'center' }}>
                 <Text style={{ color: '#EF4444', fontWeight: '700' }}>이 장소 삭제하기</Text>
               </Pressable>
@@ -412,10 +489,18 @@ export default function ClassScreen() {
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, paddingTop: 20, alignItems: "center", paddingBottom: 24, backgroundColor: "#F6F7FB" },
-  
+
   headerRow: { width: "92%", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
   title: { fontSize: 20, fontWeight: "800", color: "#111827" },
-  
+  sourceBanner: { width: '92%', backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 },
+  sourceBannerTitle: { color: '#3730A3', fontWeight: '800', marginBottom: 3 },
+  sourceBannerText: { color: '#4F46E5', fontSize: 12 },
+  errorBox: { width: '92%', backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
+  errorText: { color: '#991B1B', marginBottom: 8 },
+  retryText: { color: '#4F46E5', fontWeight: '800' },
+  emptyClasses: { width: '92%', color: '#6B7280', textAlign: 'center', paddingVertical: 30 },
+
   mapBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EEF2FF', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE' },
   mapBtnText: { marginLeft: 6, color: '#4F46E5', fontWeight: '700', fontSize: 13 },
 
@@ -438,7 +523,7 @@ const styles = StyleSheet.create({
   pickerShell: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E5E7EB" },
   pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative", justifyContent: 'center', height: 50, paddingRight: 12, },
   picker: { height: 50, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
-  pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingLeft: 15 },
+  pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingLeft: 15 } as ViewStyle & { outlineStyle: "none"; outlineWidth: number },
   pickerChevron: { position: "absolute", right: 12, top: 0, height: 44, justifyContent: "center", alignItems: "center" },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },

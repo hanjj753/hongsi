@@ -1,0 +1,5 @@
+# Real imports, credentials, and scratch database files stay local.
+.local/
+.temp/
+.branches/
+.env*

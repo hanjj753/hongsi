@@ -13,6 +13,18 @@ import { getActiveSession, startSession, clearSession } from "../../utils/active
 import { getCurrentUserEmail } from "../../utils/currentUser";
 import DirectSms from "../../utils/smsSender";
 import { getClassUrls } from "../../utils/classInfo";
+import { isSupabaseDataSource } from "../../config/dataSource";
+import {
+  addSupabaseClassSessions,
+  deleteSupabaseClassSession,
+  getSupabaseActiveStaff,
+  getSupabaseClassDetail,
+  updateSupabaseClassSession,
+  type AssignableStaff,
+} from "../../lib/classData";
+import { useAppAccess } from "../../contexts/AppAccessContext";
+import { AppAccessGate } from "../../components/AppAccessGate";
+import { ClassStudentManager } from "../../components/ClassStudentManager";
 
 // PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS,
@@ -88,8 +100,9 @@ const buildRecurringDates = (startYmd: string, weekdays: number[], count: number
   return dates;
 };
 
-export default function ClassDetailScreen() {
+function ClassDetailScreen() {
   const router = useRouter();
+  const { access } = useAppAccess();
   const params = useLocalSearchParams();
   const rootNavState = useRootNavigationState();
   const navReady = !!rootNavState?.key;
@@ -97,12 +110,12 @@ export default function ClassDetailScreen() {
   const userEmail = getCurrentUserEmail();
 
   useEffect(() => { if (navReady && !userEmail) router.replace("/(tabs)"); }, [navReady, userEmail, router]);
-  if (!navReady || !userEmail) return null;
 
   // --- State ---
   const actionInFlightRef = useRef(false);
   const [row, setRow] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   
   const [saving, setSaving] = useState(false);
   const [sendingNotice, setSendingNotice] = useState(false); 
@@ -124,6 +137,8 @@ export default function ClassDetailScreen() {
   const [scheduleSession, setScheduleSession] = useState("");
   const [scheduleNote, setScheduleNote] = useState("");
   const [scheduleWorkers, setScheduleWorkers] = useState("");
+  const [assignableStaff, setAssignableStaff] = useState<AssignableStaff[]>([]);
+  const [scheduleStaffIds, setScheduleStaffIds] = useState<string[]>([]);
   const [scheduleMode, setScheduleMode] = useState<"single" | "repeat">("single");
   const [repeatCount, setRepeatCount] = useState("8");
   const [repeatWeekdays, setRepeatWeekdays] = useState<number[]>([]);
@@ -172,6 +187,14 @@ export default function ClassDetailScreen() {
     const checkPermissions = async () => {
       if (!userEmail) return;
 
+      if (isSupabaseDataSource) {
+        setIsAdmin(access?.app_role === 'admin');
+        setIsManager(access?.app_role === 'manager');
+        setIsAdminDevice(false);
+        setWorkerName(access?.full_name || "이름 없음");
+        return;
+      }
+
       try {
         const data = await fetchSheetData(CSV_URLS.PERMISSIONS);
         if (!Array.isArray(data)) return;
@@ -205,12 +228,21 @@ export default function ClassDetailScreen() {
     };
 
     checkPermissions();
-  }, [userEmail]);
+  }, [access, userEmail]);
   
   // 1. 데이터 로드
   useEffect(() => {
     (async () => {
       try {
+        setLoadError("");
+        if (isSupabaseDataSource) {
+          const [result, staff] = await Promise.all([getSupabaseClassDetail(targetId), getSupabaseActiveStaff()]);
+          setRow(result.row);
+          setScheduleRows(result.schedules);
+          setAssignableStaff(staff);
+          return;
+        }
+
         const [cData, aData, sData] = await Promise.all([
           fetchSheetData(CSV_URLS.CLASSES), 
           fetchSheetData(CSV_URLS.ASSISTANT_INFO),
@@ -245,6 +277,9 @@ export default function ClassDetailScreen() {
           setScheduleRows(mySchedules);
         }
 
+      } catch (error: any) {
+        console.error(error);
+        setLoadError(error?.message || "수업 정보를 불러오지 못했습니다.");
       } finally { setLoading(false); }
     })();
   }, [targetId]);
@@ -252,6 +287,7 @@ export default function ClassDetailScreen() {
   useEffect(() => {
     if (row) {
       setScheduleWorkers(String(row[CLASSES_HEADERS.WORKERS] ?? ""));
+      if (isSupabaseDataSource) setScheduleStaffIds(Array.isArray(row.__staffIds) ? row.__staffIds : []);
     }
   }, [row]);
 
@@ -343,7 +379,9 @@ export default function ClassDetailScreen() {
     setMessage("출근 버튼을 눌러 진행하세요.");
   }, [classTitle, targetId, userEmail]);
 
-  useEffect(() => { if (row) loadAttendanceStatus(); }, [row, loadAttendanceStatus]);
+  useEffect(() => {
+    if (row && !isSupabaseDataSource) loadAttendanceStatus();
+  }, [row, loadAttendanceStatus]);
 
   // 4. 출근 핸들러
   const handleCheckIn = async () => {
@@ -797,6 +835,18 @@ export default function ClassDetailScreen() {
   const processDelete = async () => {
     setSaving(true);
     try {
+      if (isSupabaseDataSource) {
+        const selected = scheduleRows.find(item => String(item[SCHEDULE_HEADERS.SESSION]) === String(scheduleSession));
+        if (!selected?.__dbId) throw new Error("삭제할 차시를 찾을 수 없습니다.");
+        await deleteSupabaseClassSession(targetId, String(selected.__dbId));
+        const refreshed = await getSupabaseClassDetail(targetId);
+        setRow(refreshed.row);
+        setScheduleRows(refreshed.schedules);
+        closeModal();
+        showAlert("삭제 완료", "일정과 이 차시에 연결된 출석·숙제·시험·문자 기록을 삭제했습니다.");
+        return;
+      }
+
       const payload = {
         action: "delete_class_schedule",
         classId: targetId,
@@ -815,7 +865,7 @@ export default function ClassDetailScreen() {
       }
     } catch (e) {
       console.error(e);
-      showAlert("오류", "삭제 중 오류가 발생했습니다.");
+      showAlert("오류", e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
@@ -824,7 +874,9 @@ export default function ClassDetailScreen() {
   const handleDeleteSchedule = () => {
     // 🌐 웹 환경: 브라우저 기본 confirm 창 사용
     if (Platform.OS === 'web') {
-      const ok = window.confirm(`${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`);
+      const ok = window.confirm(isSupabaseDataSource
+        ? `${scheduleSession}차시 일정과 연결된 출석·숙제·시험·문자 기록을 완전히 삭제하시겠습니까?`
+        : `${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`);
       if (ok) {
         processDelete();
       }
@@ -834,7 +886,9 @@ export default function ClassDetailScreen() {
     // 📱 앱 환경: React Native Alert 사용
     Alert.alert(
       "일정 삭제",
-      `${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`,
+      isSupabaseDataSource
+        ? `${scheduleSession}차시 일정과 연결된 출석·숙제·시험·문자 기록을 완전히 삭제하시겠습니까?`
+        : `${scheduleSession}차시 일정을 정말 삭제하시겠습니까?`,
       [
         { text: "취소", style: "cancel" },
         {
@@ -889,6 +943,34 @@ export default function ClassDetailScreen() {
 
     setSaving(true);
     try {
+      if (isSupabaseDataSource) {
+        let count = generatedRows.length;
+        if (isEditMode) {
+          const selected = scheduleRows.find(item => String(item[SCHEDULE_HEADERS.SESSION]) === String(scheduleSession));
+          if (!selected?.__dbId) throw new Error("수정할 차시를 찾을 수 없습니다.");
+          await updateSupabaseClassSession(
+            targetId,
+            String(selected.__dbId),
+            selectedDate,
+            scheduleNote,
+            scheduleStaffIds,
+          );
+        } else {
+          count = await addSupabaseClassSessions(targetId, generatedRows.map((item) => ({
+            sessionNumber: Number(item.session),
+            sessionDate: item.date,
+            notes: item.note,
+            staffIds: scheduleStaffIds,
+          })));
+        }
+        const refreshed = await getSupabaseClassDetail(targetId);
+        setRow(refreshed.row);
+        setScheduleRows(refreshed.schedules);
+        closeModal();
+        showAlert("성공", isEditMode ? "일정을 수정했습니다." : count > 1 ? `${count}개의 일정을 등록했습니다.` : "새 일정을 등록했습니다.");
+        return;
+      }
+
       const payload = isBulkAdd ? {
         action: "add_class_schedules",
         schedules: generatedRows
@@ -946,7 +1028,7 @@ export default function ClassDetailScreen() {
       }
     } catch (e) {
       console.error(e);
-      showAlert("오류", "전송 중 문제가 발생했습니다.");
+      showAlert("오류", e instanceof Error ? e.message : "일정을 저장하지 못했습니다.");
     } finally {
       setSaving(false);
     }
@@ -960,6 +1042,7 @@ export default function ClassDetailScreen() {
     setSelectedDate("");
     setScheduleSession("");
     setScheduleWorkers("");
+    setScheduleStaffIds([]);
     setScheduleNote("");
     setScheduleMode("single");
     setRepeatCount("8");
@@ -974,6 +1057,7 @@ export default function ClassDetailScreen() {
     setSelectedDate("");
     setScheduleSession(String(nextSession));
     setScheduleWorkers(String(row[CLASSES_HEADERS.WORKERS] ?? ""));
+    setScheduleStaffIds(Array.isArray(row.__staffIds) ? row.__staffIds : []);
     setScheduleNote("");
     setRepeatCount("8");
     setRepeatWeekdays(weekdaysFromText(String(row[CLASSES_HEADERS.DAY] ?? "")));
@@ -994,12 +1078,22 @@ export default function ClassDetailScreen() {
     setSelectedDate(item[SCHEDULE_HEADERS.DATE]);
     setScheduleSession(String(item[SCHEDULE_HEADERS.SESSION])); // 숫자인 경우 문자열로 변환
     setScheduleWorkers(item[SCHEDULE_HEADERS.WORKERS] || "");
+    setScheduleStaffIds(isSupabaseDataSource && Array.isArray(item.__staffIds) ? item.__staffIds : []);
     setScheduleNote(item[SCHEDULE_HEADERS.NOTE] || "");
     
     setScheduleModalVisible(true); // 모달 열기
   };
 
+  if (!navReady || !userEmail) return null;
   if (loading) return <View style={[styles.container, { justifyContent: "center" }]}><ActivityIndicator /></View>;
+  if (loadError) return (
+    <View style={[styles.container, { justifyContent: "center", paddingHorizontal: 24 }]}>
+      <Text style={{ color: '#991B1B', textAlign: 'center', marginBottom: 16 }}>{loadError}</Text>
+      <Pressable onPress={() => router.replace("/(tabs)/class")} style={styles.backBtn}>
+        <Text style={styles.backText}>← 수업 목록</Text>
+      </Pressable>
+    </View>
+  );
   if (!row) return <View style={styles.container}><Text>수업 정보를 찾을 수 없습니다.</Text></View>;
 
   const fabDisabled = saving;
@@ -1013,8 +1107,17 @@ export default function ClassDetailScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.title}>{`${classTitle} ${String(row[CLASSES_HEADERS.DAY] ?? "")}`}</Text>
+        <Text style={styles.title}>{isSupabaseDataSource && row.__classLabel
+          ? String(row.__classLabel)
+          : `${classTitle} ${String(row[CLASSES_HEADERS.DAY] ?? "")}`}</Text>
         <Text style={styles.meta}>{String(row[CLASSES_HEADERS.SCHOOL] ?? "")} · {String(row[CLASSES_HEADERS.QUARTER] ?? "")}</Text>
+
+        {isSupabaseDataSource && (
+          <View style={styles.sourceBanner}>
+            <Text style={styles.sourceBannerTitle}>Supabase 개발 데이터</Text>
+            <Text style={styles.sourceBannerText}>학생 정보는 이 수업 화면에서 관리합니다. 차시를 누르면 기존 기록을 확인하고 표 형태로 한 번에 입력할 수 있습니다.</Text>
+          </View>
+        )}
 
         <View style={styles.infoRow}>
             <View style={styles.infoItem}>
@@ -1033,6 +1136,13 @@ export default function ClassDetailScreen() {
                 <Text style={styles.value}>{String(row[CLASSES_HEADERS.WORKERS] ?? "-")}</Text>
             </View>
         </View>
+
+        {isSupabaseDataSource && (
+          <ClassStudentManager
+            classId={targetId}
+            defaultJoinedOn={String(scheduleRows[0]?.[SCHEDULE_HEADERS.DATE] ?? todayYmd())}
+          />
+        )}
 
         <View style={styles.card}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1078,9 +1188,11 @@ export default function ClassDetailScreen() {
 
                     return (
                       <Pressable 
-                        key={idx} 
+                        key={String(item.__dbId ?? idx)}
                         style={[styles.scheduleBox, boxStyle]}
-                        onPress={() => handlePressSchedule(item)} 
+                        onPress={isSupabaseDataSource
+                          ? () => router.push({ pathname: "/session/[id]", params: { id: String(item.__dbId), classId: targetId, title: String(row.__classLabel || classTitle) } })
+                          : () => handlePressSchedule(item)}
                       >
                         <Text style={[styles.boxSessionText, textStyle]}>
                           {item[SCHEDULE_HEADERS.SESSION]}차시
@@ -1103,6 +1215,12 @@ export default function ClassDetailScreen() {
                       </Pressable>
                     );
                   })}
+                  {(isAdmin || isManager) && isSupabaseDataSource && (
+                    <Pressable style={[styles.scheduleBox, styles.addScheduleBox]} onPress={openAddScheduleModal}>
+                      <Ionicons name="add-circle-outline" size={24} color="#4F46E5" />
+                      <Text style={styles.addScheduleText}>차시 추가</Text>
+                    </Pressable>
+                  )}
                 </ScrollView>
               </View>
 
@@ -1112,13 +1230,21 @@ export default function ClassDetailScreen() {
                   <Text style={[styles.th, { flex: 1.6 }]}>날짜</Text>
                   <Text style={[styles.th, { flex: 1.2 }]}>근무자</Text>
                   <Text style={[styles.th, { flex: 2 }]}>비고</Text>
+                  {(isAdmin || isManager) && <Text style={[styles.th, { flex: 0.8 }]}>관리</Text>}
                 </View>
                 {scheduleRows.map((item, idx) => (
-                  <View key={idx} style={styles.tr}>
+                  <View key={String(item.__dbId ?? idx)} style={styles.tr}>
                     <Text style={[styles.td, { flex: 0.6 }]}>{String(item[SCHEDULE_HEADERS.SESSION] ?? "")}</Text>
                     <Text style={[styles.td, { flex: 1.6 }]}>{String(item[SCHEDULE_HEADERS.DATE] ?? "")}</Text>
                     <Text style={[styles.td, { flex: 1.2 }]}>{String(item[SCHEDULE_HEADERS.WORKERS] ?? "")}</Text>
                     <Text style={[styles.td, { flex: 2 }]}>{String(item[SCHEDULE_HEADERS.NOTE] ?? "")}</Text>
+                    {(isAdmin || isManager) && (
+                      <View style={[styles.tdAction, { flex: 0.8 }]}>
+                        <Pressable style={styles.scheduleEditButton} onPress={() => handlePressSchedule(item)}>
+                          <Text style={styles.scheduleEditButtonText}>수정/삭제</Text>
+                        </Pressable>
+                      </View>
+                    )}
                   </View>
                 ))}
               </View>
@@ -1126,14 +1252,15 @@ export default function ClassDetailScreen() {
           )}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>출근 관리</Text>
-          <Text style={styles.desc}>위치 확인 없이 출근/퇴근 시간만 기록합니다.</Text>
-          <Text style={styles.msg}>{message}</Text>
-          {checkedIn && checkInTime && <Text style={styles.debug}>출근시간: {checkInTime}</Text>}
-        </View>
+        {!isSupabaseDataSource && <>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>출근 관리</Text>
+            <Text style={styles.desc}>위치 확인 없이 출근/퇴근 시간만 기록합니다.</Text>
+            <Text style={styles.msg}>{message}</Text>
+            {checkedIn && checkInTime && <Text style={styles.debug}>출근시간: {checkInTime}</Text>}
+          </View>
 
-        <View style={styles.card}>
+          <View style={styles.card}>
           <Text style={styles.cardTitle}>공지 메시지 추가</Text>
           <Text style={styles.desc}>이 수업의 모든 학생에게 공지를 등록합니다.</Text>
           <TextInput 
@@ -1159,9 +1286,9 @@ export default function ClassDetailScreen() {
               {noticeMsg}
             </Text>
           )}
-        </View>
+          </View>
 
-        <View style={styles.card}>
+          <View style={styles.card}>
           <Text style={styles.cardTitle}>개별 메시지 추가</Text>
           <Text style={styles.desc}>차시에 맞는 출석/숙제/시험 점수를 불러와 발송합니다.</Text>
           
@@ -1206,17 +1333,18 @@ export default function ClassDetailScreen() {
           )}
 
           {!!individualMsg && <Text style={{ color: '#059669', fontWeight: '700', textAlign: 'center', marginTop: 12 }}>{individualMsg}</Text>}
-        </View>
+          </View>
 
-        { isAdminDevice && (
-          <View style={styles.card}>
+          {isAdminDevice && (
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>문자 발송</Text>
               <Text style={styles.desc}>해당 수업의 구글 시트에 등록된 문자(unsent)를 보냅니다.</Text>
               <Pressable style={({ pressed }) => [styles.btnBlue, pressed && { opacity: 0.8 }]} onPress={handleDirectSms}>
                 <Text style={styles.btnText}>[문자 발송]</Text>
               </Pressable>
             </View>
-        )}
+          )}
+        </>}
       </ScrollView>
 
       <Modal visible={studentSelectionModalVisible} animationType="slide" transparent>
@@ -1363,13 +1491,35 @@ export default function ClassDetailScreen() {
                 </View>
                 <View style={{ flex: 1.5 }}>
                   <Text style={styles.label}>예정 근무자</Text>
-                  <TextInput 
-                    style={[styles.modalInput, !scheduleWorkers && { fontStyle: 'italic' }]}
-                    placeholder="이름 입력" 
-                    placeholderTextColor="#9CA3AF"
-                    value={scheduleWorkers}
-                    onChangeText={setScheduleWorkers}
-                  />
+                  {isSupabaseDataSource ? (
+                    <View style={styles.staffPicker}>
+                      {assignableStaff.length === 0 ? (
+                        <Text style={styles.staffPickerEmpty}>등록된 근무자가 없습니다.</Text>
+                      ) : assignableStaff.map((staff) => {
+                        const selected = scheduleStaffIds.includes(staff.id);
+                        return (
+                          <Pressable
+                            key={staff.id}
+                            style={[styles.staffChip, selected && styles.staffChipSelected]}
+                            onPress={() => setScheduleStaffIds((current) => selected
+                              ? current.filter((id) => id !== staff.id)
+                              : [...current, staff.id])}
+                          >
+                            <Ionicons name={selected ? "checkbox" : "square-outline"} size={17} color={selected ? "#4F46E5" : "#6B7280"} />
+                            <Text style={[styles.staffChipText, selected && styles.staffChipTextSelected]}>{staff.fullName}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <TextInput
+                      style={[styles.modalInput, !scheduleWorkers && { fontStyle: 'italic' }]}
+                      placeholder="이름 입력"
+                      placeholderTextColor="#9CA3AF"
+                      value={scheduleWorkers}
+                      onChangeText={setScheduleWorkers}
+                    />
+                  )}
                 </View>
               </View>
 
@@ -1469,10 +1619,20 @@ export default function ClassDetailScreen() {
         </View>
       </Modal>
 
-      <Pressable disabled={fabDisabled} onPress={checkedIn ? handleCheckOut : handleCheckIn} style={[styles.fab, fabDisabled ? { opacity: 0.5 } : checkedIn ? { backgroundColor: "#4B5563" } : { backgroundColor: "#4F46E5" }]}>
-        <Text style={styles.fabText}>{checkedIn ? "퇴근" : "출근"}</Text>
-      </Pressable>
+      {!isSupabaseDataSource && (
+        <Pressable disabled={fabDisabled} onPress={checkedIn ? handleCheckOut : handleCheckIn} style={[styles.fab, fabDisabled ? { opacity: 0.5 } : checkedIn ? { backgroundColor: "#4B5563" } : { backgroundColor: "#4F46E5" }]}>
+          <Text style={styles.fabText}>{checkedIn ? "퇴근" : "출근"}</Text>
+        </Pressable>
+      )}
     </View>
+  );
+}
+
+export default function ClassDetailRoute() {
+  return (
+    <AppAccessGate>
+      <ClassDetailScreen />
+    </AppAccessGate>
   );
 }
 
@@ -1483,6 +1643,9 @@ const styles = StyleSheet.create({
   backText: { fontSize: 14, color: "#4F46E5", fontWeight: "600" },
   title: { fontSize: 22, fontWeight: "800", color: "#111", marginBottom: 4 },
   meta: { fontSize: 14, color: "#666", marginBottom: 20 },
+  sourceBanner: { width: '100%', backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 },
+  sourceBannerTitle: { color: '#3730A3', fontWeight: '800', marginBottom: 3 },
+  sourceBannerText: { color: '#4F46E5', fontSize: 12, lineHeight: 18 },
   infoRow: { flexDirection: 'row', gap: 15, marginBottom: 20 },
   infoItem: { backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', flex: 1 },
   label: { fontSize: 12, fontWeight: "700", color: "#6B7280", marginBottom: 4 },
@@ -1490,6 +1653,8 @@ const styles = StyleSheet.create({
   
   card: { backgroundColor: "#fff", borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: "#E5E7EB", elevation: 2 },
   cardTitle: { fontSize: 16, fontWeight: "700", marginBottom: 6, color: "#1F2937" },
+  addScheduleBox: { alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed', borderColor: '#A5B4FC', backgroundColor: '#EEF2FF' },
+  addScheduleText: { marginTop: 5, color: '#4F46E5', fontSize: 12, fontWeight: '800' },
   desc: { fontSize: 13, color: "#6B7280", marginBottom: 10, lineHeight: 18 },
   msg: { fontSize: 14, color: "#111827", fontWeight: "600", marginTop: 4 },
   debug: { fontSize: 12, color: "#059669", marginTop: 6, fontWeight: "600" },
@@ -1507,6 +1672,12 @@ const styles = StyleSheet.create({
   modalView: { backgroundColor: "white", borderRadius: 12, padding: 20, alignItems: "center", shadowColor: "#000", elevation: 5 },
   modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15, color: "#1F2937" },
   modalInput: { height: 46, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8, paddingHorizontal: 12, fontSize: 14, backgroundColor: "#F9FAFB", marginBottom: 0 },
+  staffPicker: { minHeight: 46, flexDirection: 'row', flexWrap: 'wrap', gap: 6, padding: 6, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, backgroundColor: '#F9FAFB' },
+  staffPickerEmpty: { padding: 7, color: '#9CA3AF', fontSize: 13 },
+  staffChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF' },
+  staffChipSelected: { borderColor: '#A5B4FC', backgroundColor: '#EEF2FF' },
+  staffChipText: { color: '#4B5563', fontSize: 12, fontWeight: '700' },
+  staffChipTextSelected: { color: '#4338CA' },
   scheduleModeControl: { width: '100%', flexDirection: 'row', backgroundColor: '#F3F4F6', borderRadius: 8, padding: 3, marginBottom: 16 },
   scheduleModeOption: { flex: 1, minHeight: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
   scheduleModeOptionActive: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#D1D5DB' },
@@ -1535,6 +1706,9 @@ const styles = StyleSheet.create({
   td: { fontSize: 12, color: '#333', textAlign: 'center' },
 
   scrollContainer: { marginBottom: 15 },
+  scheduleEditButton: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: 7, backgroundColor: '#EEF2FF' },
+  scheduleEditButtonText: { color: '#4338CA', fontSize: 11, fontWeight: '800' },
+  tdAction: { justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, borderRightWidth: 1, borderRightColor: '#E5E7EB' },
   scheduleBox: { width: 200, height: 100, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 8, borderWidth: 1, padding: 6},
 
   boxPast: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },     // 지난 수업 (회색)

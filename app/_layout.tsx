@@ -7,6 +7,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import AntDesign from "@expo/vector-icons/AntDesign";
 import Feather from "@expo/vector-icons/Feather";
+import { AppAccessProvider } from "../contexts/AppAccessContext";
 
 // 앱 리소스가 로드될 때까지 스플래시 화면 유지
 SplashScreen.preventAutoHideAsync();
@@ -43,14 +44,17 @@ export default function RootLayout() {
   // 4. 네비게이션 스택 정의
   // Stack Navigator: 화면 전환 관리
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      {/* - index: 로그인 화면 (초기 화면)
-         - (tabs): 메인 탭 화면 (로그인 후 진입)
-         - class/[id]: 수업 상세 및 출석 화면 (동적 라우팅)
-      */}
-      <Stack.Screen name="index" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="class/[id]" />
-    </Stack>
+    <AppAccessProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        {/* - index: 로그인 화면 (초기 화면)
+           - (tabs): 메인 탭 화면 (로그인 후 진입)
+           - class/[id]: 수업 상세 및 출석 화면 (동적 라우팅)
+        */}
+        <Stack.Screen name="index" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="class/[id]" />
+        <Stack.Screen name="session/[id]" />
+      </Stack>
+    </AppAccessProvider>
   );
 }

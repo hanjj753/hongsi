@@ -1,0 +1,11 @@
+{
+  "name": "hongsi-schema-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node schema.test.mjs && node access.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

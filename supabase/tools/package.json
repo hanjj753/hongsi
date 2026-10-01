@@ -1,0 +1,11 @@
+{
+  "name": "hongsi-firebase-provisioning",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "provision": "node provision-firebase.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "14.4.0"
+  }
+}

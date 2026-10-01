@@ -16,6 +16,7 @@
     "@react-native-firebase/auth": "^23.7.0",
     "@react-native-google-signin/google-signin": "^16.0.0",
     "@react-native-picker/picker": "^2.11.4",
+    "@supabase/supabase-js": "2.116.0",
     "expo": "~52.0.48",
     "expo-application": "~6.0.2",
     "expo-asset": "~11.0.5",

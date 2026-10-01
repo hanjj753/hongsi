@@ -20,6 +20,8 @@ import { getCurrentUserEmail } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
 import { postSheetData } from "../../utils/sheetApi";
+import { isSupabaseDataSource } from '../../config/dataSource';
+import { useAppAccess } from '../../contexts/AppAccessContext';
 
 // ==========================================
 // Types & Helpers
@@ -77,6 +79,7 @@ function secondsToHMS(totalSec: number): string {
 // ==========================================
 export default function HomeScreen() {
   const router = useRouter();
+  const { access } = useAppAccess();
   const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<WorkRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +115,13 @@ export default function HomeScreen() {
     const u = Platform.OS === 'web' ? webAuth.currentUser : auth().currentUser;
     setUser(u);
 
+    if (isSupabaseDataSource) {
+      setIsAdmin(access?.app_role === 'admin');
+      setIsManager(access?.app_role === 'manager');
+      setLoading(false);
+      return;
+    }
+
     let currentAndroidId: string | null = null;
     if (Platform.OS === 'android') {
       try {
@@ -126,7 +136,7 @@ export default function HomeScreen() {
       registerUserToSheet(u, currentAndroidId);
       checkAdminPermission(u.email);
     }
-  }, []);
+  }, [access]);
 
   const registerUserToSheet = async (userData: any, dId: string | null) => {
     if (!userData || !userData.email) return;
@@ -198,6 +208,11 @@ export default function HomeScreen() {
   };
 
   const load = useCallback(async () => {
+    if (isSupabaseDataSource) {
+      setRows([]);
+      return;
+    }
+
     const email = getCurrentUserEmail();
     if (!email) return;
 
@@ -237,9 +252,12 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
-    if (user) checkAdminPermission(user.email);
-    setRefreshing(false);
+    try {
+      await load();
+      if (!isSupabaseDataSource && user) await checkAdminPermission(user.email);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const monthOptions = useMemo(() => {
@@ -412,7 +430,7 @@ export default function HomeScreen() {
             </View>
 
             {/* Admin인 경우에만 보이는 버튼 */}
-            {isAdmin && (
+            {!isSupabaseDataSource && isAdmin && (
               <View style={styles.authButtonContainer}>
                 <TouchableOpacity style={styles.reqBtnAdmin} onPress={() => openAddModal("Admin")}>
                   <Text style={styles.reqBtnText}>+ Admin 추가</Text>
@@ -424,7 +442,7 @@ export default function HomeScreen() {
               </View>
             )}
 
-            {(isAdmin || isManager) && (
+            {!isSupabaseDataSource && (isAdmin || isManager) && (
               <TouchableOpacity 
                 style={[styles.reqBtnManager, { marginTop: 10, backgroundColor: '#10B981' }]} 
                 onPress={openAddAssistantModal}
@@ -433,7 +451,14 @@ export default function HomeScreen() {
               </TouchableOpacity>
             )}
 
-            {rows.length === 0 ? (
+            {isSupabaseDataSource ? (
+              <View style={styles.developmentNotice}>
+                <Text style={styles.developmentNoticeTitle}>Supabase 개발 모드</Text>
+                <Text style={styles.developmentNoticeText}>
+                  로그인과 계정 권한 확인이 완료되었습니다. 입력한 수업과 차시는 아래 수업 탭에서 확인할 수 있습니다.
+                </Text>
+              </View>
+            ) : rows.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyStateText}>근무 기록이 없습니다.</Text>
               </View>
@@ -612,4 +637,7 @@ const styles = StyleSheet.create({
 
   emptyContainer: { marginTop: 60, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { fontSize: 16, color: '#9CA3AF', fontWeight: '600' },
+  developmentNotice: { marginTop: 24, padding: 16, borderWidth: 1, borderColor: '#C7D2FE', borderRadius: 12, backgroundColor: '#EEF2FF' },
+  developmentNoticeTitle: { color: '#3730A3', fontWeight: '800', marginBottom: 6 },
+  developmentNoticeText: { color: '#4F46E5', lineHeight: 21 },
 });

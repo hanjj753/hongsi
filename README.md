@@ -99,6 +99,9 @@ import { FontAwesome } from '@expo/vector-icons';
 - 804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com (앱)
 - client_secret_804211566696-b1o5umsuod4jg1mfqmse44fegdfpp9hm.apps.googleusercontent.com.json 확인 (웹)
 
+### Firebase Admin SDK 비공개 키
+- hongsi-assistant-firebase-adminsdk-fbsvc-92b1c97e7d.json
+
 ## 앱 아이콘 변경하기
 1. 아래 명령어로 임시 프로젝트를 만든다.
 ```bash

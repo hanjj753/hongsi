@@ -2,10 +2,12 @@ import { Tabs } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import AntDesign from '@expo/vector-icons/AntDesign';
+import { AppAccessGate } from '../../components/AppAccessGate';
 
 export default function TabLayout() {
   return (
-    <Tabs screenOptions={{ tabBarActiveTintColor: '#ef806c' }}>
+    <AppAccessGate>
+      <Tabs screenOptions={{ tabBarActiveTintColor: '#ef806c' }}>
       {/* 1. 홈 탭 */}
       <Tabs.Screen
         name="index"
@@ -51,6 +53,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <FontAwesome5 name="question-circle" size={24} color={color} />,
         }}
       />
-    </Tabs>
+      </Tabs>
+    </AppAccessGate>
   );
 }

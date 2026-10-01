@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons'; // 아이콘 사용
@@ -7,70 +7,88 @@ import auth from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged as onWebAuthStateChanged, signOut } from 'firebase/auth';
 import { webAuth } from '../firebaseConfig';
+import { isSupabaseDataSource } from '../config/dataSource';
+import { useAppAccess } from '../contexts/AppAccessContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { state: accessState, errorMessage: accessError, refreshAccess } = useAppAccess();
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  const loginInProgress = useRef(false);
+
+  // Supabase mode must wait for the Firebase user to be checked against the
+  // staff/access tables before entering the protected tab navigator. Routing
+  // immediately after the popup can race with the gate's signed-out state and
+  // bounce the user back to this screen.
+  useEffect(() => {
+    if (!isSupabaseDataSource || !webAuth.currentUser) return;
+    if (accessState !== 'checking' && accessState !== 'signed_out') {
+      router.replace('/(tabs)');
+    }
+  }, [accessState, router]);
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        if (Platform.OS === 'web') {
-          // [Web] 로직
-          onWebAuthStateChanged(webAuth, async (user) => {
-            if (user) {
+    if (Platform.OS === 'web') {
+      return onWebAuthStateChanged(webAuth, async (user) => {
+        try {
+          if (user) {
+            if (isSupabaseDataSource) {
+              // AppAccessProvider performs the access check. The effect above
+              // navigates only after that check reaches a final state.
+            } else {
               const token = localStorage.getItem('google_access_token');
               if (token) router.replace('/(tabs)');
-              else await signOut(webAuth); 
+              else if (!loginInProgress.current) await signOut(webAuth);
             }
-            setInitializing(false); // 웹 초기화 완료
-          });
-        } else {
-          // [App] 앱용 구글 로그인 설정
-          // ⚠️ 여기서 에러가 나면 흰 화면이 됩니다. try-catch로 잡습니다.
-          try {
-            GoogleSignin.configure({
-              webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com', 
-              scopes: ['https://www.googleapis.com/auth/drive.readonly'],
-            });
-          } catch (configError: any) {
-            console.error("GoogleSignin Config Error:", configError);
-            Alert.alert("설정 오류", "구글 로그인 설정 중 오류가 발생했습니다.\n" + configError.message);
           }
-
-          const subscriber = auth().onAuthStateChanged((user) => {
-            if (user) router.replace('/(tabs)');
-            setInitializing(false); // 앱 초기화 완료
-          });
-          return subscriber;
+        } catch (error: any) {
+          console.error('Auth state error:', error);
+          Alert.alert('초기화 오류', error.message);
+        } finally {
+          setInitializing(false);
         }
-      } catch (e: any) {
-        console.error("Init Error:", e);
-        Alert.alert("초기화 오류", e.message);
-        setInitializing(false);
-      }
-    };
+      });
+    }
 
-    init();
-  }, []);
+    try {
+      GoogleSignin.configure({
+        webClientId: '804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com',
+        scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+      });
+    } catch (configError: any) {
+      console.error('GoogleSignin Config Error:', configError);
+      Alert.alert('설정 오류', '구글 로그인 설정 중 오류가 발생했습니다.\n' + configError.message);
+    }
+
+    return auth().onAuthStateChanged((user) => {
+      if (user) router.replace('/(tabs)');
+      setInitializing(false);
+    });
+  }, [router]);
 
   async function onGoogleButtonPress() {
     if (loading) return;
+    loginInProgress.current = true;
     setLoading(true);
 
     try {
       if (Platform.OS === 'web') {
         const provider = new GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+        if (!isSupabaseDataSource) provider.addScope('https://www.googleapis.com/auth/drive.readonly');
         const result = await signInWithPopup(webAuth, provider);
 
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        const token = credential?.accessToken;
-
-        if (token) { localStorage.setItem('google_access_token', token); }
-
-        router.replace('/(tabs)');
+        if (isSupabaseDataSource) {
+          // Explicitly start the access check before navigation. This also
+          // covers browsers where auth observer callbacks are delivered late.
+          await refreshAccess();
+        } else {
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          const token = credential?.accessToken;
+          if (!token) throw new Error('Google Drive 접근 토큰을 받지 못했습니다.');
+          localStorage.setItem('google_access_token', token);
+          router.replace('/(tabs)');
+        }
       } else {
         await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
         const response = await GoogleSignin.signIn();
@@ -90,6 +108,7 @@ export default function LoginScreen() {
         Alert.alert('로그인 실패', error.message);
       }
     } finally {
+      loginInProgress.current = false;
       setLoading(false);
     }
   }
@@ -108,7 +127,7 @@ export default function LoginScreen() {
       <Ionicons name="logo-google" size={60} color="#DB4437" style={{ marginBottom: 20 }} />
       <Text style={styles.title}>김연주T 과학 로그인</Text>
       
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.button} 
         onPress={onGoogleButtonPress}
         disabled={loading}
@@ -119,6 +138,14 @@ export default function LoginScreen() {
           <Text style={styles.buttonText}>Google 계정으로 로그인</Text>
         )}
       </TouchableOpacity>
+      {loading && isSupabaseDataSource && (
+        <Text style={styles.progressText}>
+          {accessState === 'checking' ? '계정 권한을 확인하고 있습니다...' : 'Google 로그인을 완료하고 있습니다...'}
+        </Text>
+      )}
+      {!loading && isSupabaseDataSource && accessState === 'error' && Boolean(accessError) && (
+        <Text style={styles.errorText}>{accessError}</Text>
+      )}
     </View>
   );
 }
@@ -131,4 +158,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', elevation: 3 
   },
   buttonText: { color: 'white', fontSize: 16, fontWeight: '600', marginLeft: 10 },
+  progressText: { marginTop: 16, color: '#4B5563' },
+  errorText: { maxWidth: 420, marginTop: 16, paddingHorizontal: 24, color: '#B91C1C', textAlign: 'center' },
 });
