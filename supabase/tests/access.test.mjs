@@ -25,7 +25,7 @@ try {
       $$ select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
     grant usage on schema public, auth to anon,authenticated;
     grant execute on function auth.jwt() to anon,authenticated;`);
-  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql']) {
+  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql']) {
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   await db.exec(`
@@ -65,6 +65,9 @@ try {
     try {
       await denied('select * from students');
       await denied('select public.get_my_access()');
+      await denied('select public.link_my_staff_account()');
+      await denied('select public.start_my_work_shift(1)');
+      await denied('select public.finish_my_work_shift()');
       await denied("select public.save_student_session_draft(2,2,1,'{}','[]','[]')");
       await denied("select public.save_session_roster_draft(2,2,'[]')");
       await denied("select public.save_class_term(null,'2026-TEST')");
@@ -478,6 +481,46 @@ try {
         await first('select result_type,max_score from session_tests where id=$1', [memoId]),
         { result_type: 'score', max_score: '10' }
       );
+    });
+  });
+
+  await test('only a verified matching email can link a pre-registered staff account', async () => {
+    const newStaff = await first("insert into staff(id,full_name,email) values (100,'새 조교','new@example.invalid') returning id");
+    await actor('wrong-uid', async () => {
+      const result = await first('select public.link_my_staff_account() as profile');
+      assert.equal(result.profile, null);
+    }, { email: 'other@example.invalid' });
+    await actor('fresh-uid', async () => {
+      const result = await first('select public.link_my_staff_account() as profile');
+      assert.equal(result.profile.staff_id, String(newStaff.id));
+      assert.equal(result.profile.access_status, 'pending');
+      assert.equal(result.profile.app_role, 'assistant');
+      const again = await first('select public.link_my_staff_account() as profile');
+      assert.equal(again.profile.staff_id, String(newStaff.id));
+    }, { email: 'new@example.invalid' });
+    assert.equal((await first('select firebase_uid from staff where id=$1', [newStaff.id])).firebase_uid, 'fresh-uid');
+    await actor('unverified-uid', async () => {
+      await denied('select public.link_my_staff_account()');
+    }, { email: 'new@example.invalid', email_verified: false });
+  });
+
+  await test('approved staff can clock themselves in and out once; managers can correct logs', async () => {
+    await db.exec("update classes set weekdays=array[6]::smallint[], day_part='\uC800\uB141' where id=1");
+    let shiftId;
+    await actor('assistant-uid', async () => {
+      shiftId = String((await first('select public.start_my_work_shift(1) as id')).id);
+      assert.equal(String((await first('select public.start_my_work_shift(1) as id')).id), shiftId);
+      assert.equal((await first('select work_label from work_logs where id=$1', [shiftId])).work_label, '\uACFC\uD559 \uD1A0 \uC800\uB141');
+      await assert.rejects(db.query('select public.start_my_work_shift(2)'), error => error.code === '23514');
+      assert.equal((await first('select staff_id,class_id,ended_at from work_logs where id=$1', [shiftId])).ended_at, null);
+      await db.query('delete from work_logs where id=$1', [shiftId]);
+      assert.equal((await first('select count(*)::int n from work_logs where id=$1', [shiftId])).n, 1);
+      assert.equal(String((await first('select public.finish_my_work_shift() as id')).id), shiftId);
+      await assert.rejects(db.query('select public.finish_my_work_shift()'), error => error.code === 'P0002');
+    });
+    await actor('manager-uid', async () => {
+      await db.query('delete from work_logs where id=$1', [shiftId]);
+      assert.equal((await first('select count(*)::int n from work_logs where id=$1', [shiftId])).n, 0);
     });
   });
   console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);

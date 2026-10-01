@@ -25,6 +25,7 @@ import {
 import { useAppAccess } from "../../contexts/AppAccessContext";
 import { AppAccessGate } from "../../components/AppAccessGate";
 import { ClassStudentManager } from "../../components/ClassStudentManager";
+import SupabaseClassWorkPanel from "../../components/SupabaseClassWorkPanel";
 
 // PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS,
@@ -1252,6 +1253,7 @@ function ClassDetailScreen() {
           )}
         </View>
 
+        {isSupabaseDataSource && <SupabaseClassWorkPanel classId={targetId} />}
         {!isSupabaseDataSource && <>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>출근 관리</Text>

@@ -12,9 +12,14 @@ export type AppAccess = {
   can_manage_accounts: boolean;
 };
 
-/** Returns null for an unlinked UID. Does not create or approve an account. */
+/** Links a verified, pre-registered email as pending; never approves it. */
 export async function getMyAppAccess(): Promise<AppAccess | null> {
-  const { data, error } = await getSupabase().rpc('get_my_access');
+  const { data: initial, error: initialError } = await getSupabase().rpc('get_my_access');
+  if (initialError) throw initialError;
+  // A verified Firebase email can claim only its pre-registered staff row.
+  const { data, error } = initial === null
+    ? await getSupabase().rpc('link_my_staff_account')
+    : { data: initial, error: null };
   if (error) throw error;
   if (data === null) return null;
   if (typeof data !== 'object' || typeof data.staff_id !== 'string'

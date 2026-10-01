@@ -1,6 +1,6 @@
 # 개발 DB 적용 및 Firebase 연결 상태
 
-작성: 2026-09-13 · 갱신: 2026-09-26 · 브랜치 `codex/migrate-to-supabase`
+작성: 2026-09-13 · 갱신: 2026-10-01 · 브랜치 `codex/migrate-to-supabase`
 
 ## 적용 완료
 
@@ -16,13 +16,18 @@
   8. `supabase/migrations/20260926000800_enrollment_moves_makeups_and_session_staff.sql`
   9. `supabase/migrations/20260926000900_restrict_enrollment_reactivation.sql`
   10. `supabase/migrations/20260926001000_link_makeup_sessions.sql`
+  11. `supabase/migrations/20260926001100_class_enrollment_session_management.sql`
+  12. `supabase/migrations/20261001001200_class_day_part.sql`
+  13. `supabase/migrations/20261001001300_test_result_formats.sql`
+  14. `supabase/migrations/20261001001400_staff_and_workflows.sql`
+  15. `supabase/migrations/20261001001500_work_label_weekdays.sql`
 - 초기 적용 시 조회 결과: **테이블 20 / RLS 활성 20 / 정책 54 / 직원 0 / 학생 0**. 2026-09-20 첫 관리자 직원 1명을 추가했다.
 - 실제 개발 REST API 검증: 공개 키만 사용한 학생·계좌정보·`get_my_access` 요청 모두 HTTP 401.
 - 매니저/관리자 모두 기기 등록·허용·차단 가능. 계정 승인·계좌 조회는 관리자만 가능.
 - 2026-09-19 Supabase Third-Party Auth 화면에서 Firebase 프로젝트 `hongsi-assistant` 연결의 **ENABLED** 상태를 확인했다. 이미 등록되어 있어 중복 생성하지 않았다.
 - `.env.local`에 개발 프로젝트 URL과 Publishable key를 설정했다. 비밀 키는 사용하지 않았으며 이 파일은 Git에서 제외된다. 다른 환경에서는 `.env.example`을 복사하고 공개 키를 채운다.
 
-적용된 SQL은 수정하지 않는다. SQL Editor 실행은 CLI의 migration history에 자동 등록되지 않으므로, CLI `db push`를 쓰기 전에 아홉 버전이 적용된 것을 확인하고 `migration repair --status applied`로 이력을 동기화해야 한다. 같은 SQL을 다시 실행하지 않는다.
+적용된 SQL은 수정하지 않는다. SQL Editor 실행은 CLI의 migration history에 자동 등록되지 않으므로, CLI `db push`를 쓰기 전에 위 15개 버전의 적용 상태를 확인하고 `migration repair --status applied`로 이력을 동기화해야 한다. 같은 SQL을 다시 실행하지 않는다.
 
 ## Firebase 연결 및 첫 관리자 등록 완료
 
@@ -63,7 +68,7 @@ node provision-firebase.mjs --email 'hongsi20222@gmail.com'
 node provision-firebase.mjs --email 'hongsi20222@gmail.com' --apply
 ```
 
-적용 뒤에는 검증된 UID·이메일·표시 이름·프로젝트 ID만 `supabase/.local/firebase-user.json`에 보관한다. 관리자 도구를 실행했다고 DB의 관리자 권한이나 승인 상태가 자동 생성되지는 않는다. 이번 첫 관리자 DB 등록은 별도 SQL로 완료했다. 신규 조교도 계정을 연결할 때 로그인 claim 설정이 필요하다. 자동 계정 연결·승인 UI는 이후 단계에 구현한다.
+적용 뒤에는 검증된 UID·이메일·표시 이름·프로젝트 ID만 `supabase/.local/firebase-user.json`에 보관한다. 관리자 도구를 실행했다고 DB의 관리자 권한이나 승인 상태가 자동 생성되지는 않는다. 이번 첫 관리자 DB 등록은 별도 SQL로 완료했다. 신규 조교도 계정을 연결할 때 로그인 claim 설정이 필요하다. 조교 정보의 이메일과 검증된 Firebase 이메일이 같으면 재로그인 시 DB 계정이 자동 연결되며, 관리자가 앱의 조교 탭에서 승인한다.
 
 `supabase/tools/verify-firebase-access.mjs`는 기존의 인증된 관리자만 대상으로 custom-token 로그인을 수행하고 개발 DB를 읽는다. DB 쓰기나 역할 변경은 하지 않으며 ID 토큰과 refresh token은 프로세스 메모리에서만 사용한다. 로그인으로 Firebase의 마지막 로그인 시각은 갱신될 수 있다. Google 로그인 UI 검증을 대신하지 않는다.
 
@@ -87,9 +92,16 @@ node --env-file=.env.local supabase/tools/verify-firebase-access.mjs --email 'ho
 - 차시 화면은 수강생 전체를 가로 표로 보여 준다. 저장된 출석·보강·복수 숙제·복수 시험 결과가 다시 표시되고, 여러 학생을 고친 뒤 표 전체를 한 번에 저장한다. 전체 저장 RPC가 한 트랜잭션으로 처리하므로 한 행이라도 잘못되면 어느 행도 바뀌지 않는다. 빈 결과를 저장하면 숙제·시험을 다시 `미입력`으로 되돌릴 수 있다.
 - 수업 탭의 분기/수업 관리에서 분기와 수업을 추가·수정·보관 삭제한다. 수업 상세에서는 단일 또는 반복 차시 일정을 추가하고, 새 일정마다 예정 근무자를 선택할 수 있다. 삭제한 분기·수업은 연결된 기록을 보존하기 위해 비활성화하며, 숙제·시험 항목 삭제는 확인 뒤 학생 결과까지 한 트랜잭션으로 실제 삭제한다.
 - 차시 기록은 학생 이름 가나다순이며, 숙제 등급별 인원과 시험의 만점·평균·최고·최저·결시 통계를 입력 중에도 계산한다.
-- 조교 출퇴근과 문자 기능은 아직 DB 구현 전이다. 개발 DB 모드에서는 해당 입력 기능을 숨겨 DB 수업 ID가 기존 Sheets 수업 ID로 잘못 사용되지 않게 했다. 운영 Sheets 모드의 기존 기능은 유지한다.
+- 개발 DB 모드의 조교 탭에서 조교 정보와 근무 기록을 조회한다. 매니저/관리자는 조교 정보와 근무 기록을 관리하고, 관리자는 계좌와 앱 권한을 관리한다. 수업 상세의 출근/퇴근은 로그인 계정의 근무 기록에 서버 시각으로 저장한다. 운영 Sheets 모드는 기존 화면을 유지한다.
 - 사용자가 데이터를 직접 입력하기로 했으므로 별도 데이터 이전 도구는 만들지 않는다. 입력 순서는 `docs/manual-data-entry.md`에 정리했다.
-- 문자 생성·기기 인증·발송 선점/결과 갱신, 조교 출퇴근 등 전용 RPC는 후속 구현이다. 기기 목록에 등록했다는 것만으로 문자 발송 권한이 생기는 방식은 사용하지 않는다.
+- 문자 생성·기기 인증·발송 선점/결과 갱신은 후속 구현이다. 기기 목록에 등록했다는 것만으로 문자 발송 권한이 생기는 방식은 사용하지 않는다.
+
+## 새 조교 계정 연결
+
+1. 개발 DB 모드의 조교 탭에서 이름과 로그인에 사용할 이메일을 등록한다. 이 단계는 앱 권한을 승인하지 않는다.
+2. 해당 조교가 같은 이메일로 Firebase Google 로그인을 한 뒤, 관리자 로컬 도구로 Supabase 로그인 claim을 설정한다. 서비스 계정 JSON은 Git에 넣지 않는다.
+3. 조교가 재로그인하면 검증된 Firebase 이메일과 DB의 사전 등록 이메일이 일치할 때 계정이 연결되고 승인 대기 상태가 된다.
+4. 관리자가 조교 탭의 앱 권한에서 역할과 승인 상태를 저장한다. 계좌번호와 재직 상태는 관리자만 수정한다.
 
 ## 검증
 
@@ -102,11 +114,12 @@ npx tsc --noEmit
 node node_modules/expo/bin/cli export --platform web --max-workers 2 --output-dir supabase/.local/web-export
 ```
 
-- 구조 테스트 30개, 역할별 접근 테스트 24개 통과.
-- 실제 개발 DB 익명 요청 차단 21개 통과. 학생·계좌·분기·수업·위치·임시 보강 참여와 본인 권한, 학생 등록, 개별/전체 기록, 분기·수업·차시 관리, 전반·수강 종료/재개·보강 참여 RPC가 모두 HTTP 401로 차단됐다. 수업 조회 테스트는 앱과 같은 중첩 관계 쿼리를 사용한다.
+- 구조 테스트 30개, 역할별 접근 테스트 28개 통과.
+- 실제 개발 DB에서 학생·계좌·분기·수업·위치·임시 보강 참여와 본인 권한, 학생 등록, 개별/전체 기록, 분기·수업·차시 관리, 전반·수강 종료/재개·보강 참여, 조교 계정 연결·출퇴근 RPC의 익명 요청 차단을 확인했다. 수업 조회 테스트는 앱과 같은 중첩 관계 쿼리를 사용한다.
 - 2026-09-20 첫 관리자 등록 SQL의 실행·재실행 차단을 로컬 PostgreSQL에서 확인한 뒤 개발 DB에 적용했다. 실제 Firebase ID 토큰 → 개발 API 관리자 조회 및 직원 신원 일치 검증 통과, 익명 요청 차단 5개 재확인 통과.
 - 2026-09-20 권한 게이트와 수업·위치·차시 조회를 연결했다. 2026-09-23 `class_code`를 제거하고 DB가 생성하는 `classes.id`를 수업 식별자로 통일했다. 2026-09-24 로그인/권한 확인 순서의 화면 전환 경합과 홈의 불필요한 Sheets 대기를 제거했고, 사용자가 입력한 첫 수업·차시의 빠른 조회와 새로고침을 확인했다. 같은 날 학생 등록·수강 배정·차시 기록 RPC를 개발 DB에 적용했다. 2026-09-25 학생 ID 자동 생성, 연락처 검증, 수업별 학생 관리, 차시 전체 표 입력, 항목 수정·삭제·통계, 분기·수업·차시 관리 기능을 개발 DB와 앱에 적용했다.
 - 2026-09-26 수강 상태·같은 분기 전반·수강 종료/재개, A/B 보강 차시 직접 연결, 전체 학생 기록 조회, 새 일정의 예정 근무자 선택을 개발 DB와 앱에 적용했다.
+- 2026-10-01 조교 계정 연결·출퇴근 RPC와 근무명 요일 표시 SQL을 개발 DB SQL Editor에서 적용하고 성공 응답을 확인했다. 조교/근무 기록 화면은 로컬 웹 빌드까지 확인했으며, 조교 본인 계정으로 하는 실제 UI 검증은 별도로 필요하다.
 - TypeScript 타입 검사와 Expo 웹 빌드 통과(정적 경로 16개). 출력은 Git에서 제외되는 로컬 검증 디렉터리에만 생성했다.
 - 권한 테스트는 PostgreSQL 안에서 이미 검증된 JWT claims를 가정한다. 실제 JWT 서명 검증, Firebase 사용자 중지/토큰 갱신, 기기 인증 및 동시 요청은 이 테스트가 증명하지 않는다.
 - 타입 검사 중 발견한 기존 잘못된 `./App` 진입점 참조와 웹 전용 Picker 스타일 타입을 수정했다.

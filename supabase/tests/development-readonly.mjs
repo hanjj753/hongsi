@@ -21,6 +21,9 @@ for (const path of [
 }
 for (const [name, body] of [
   ['get_my_access', {}],
+  ['link_my_staff_account', {}],
+  ['start_my_work_shift', { target_class_id: 1 }],
+  ['finish_my_work_shift', {}],
   ['register_student_and_enroll', {
     target_class_id: 1, target_student_id: null, new_student_code: 'DENIED', new_full_name: 'DENIED',
     new_student_phone: '', new_parent_phone: '', new_email: '', new_default_message_recipients: 'parent', new_joined_on: null,

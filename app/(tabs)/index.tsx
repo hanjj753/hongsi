@@ -22,6 +22,7 @@ import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEA
 import { postSheetData } from "../../utils/sheetApi";
 import { isSupabaseDataSource } from '../../config/dataSource';
 import { useAppAccess } from '../../contexts/AppAccessContext';
+import SupabaseHomeWorkSummary from '../../components/SupabaseHomeWorkSummary';
 
 // ==========================================
 // Types & Helpers
@@ -457,6 +458,7 @@ export default function HomeScreen() {
                 <Text style={styles.developmentNoticeText}>
                   로그인과 계정 권한 확인이 완료되었습니다. 입력한 수업과 차시는 아래 수업 탭에서 확인할 수 있습니다.
                 </Text>
+                <SupabaseHomeWorkSummary />
               </View>
             ) : rows.length === 0 ? (
               <View style={styles.emptyContainer}>

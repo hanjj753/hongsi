@@ -8,6 +8,8 @@ import AssistantFormModal, {
   EMPTY_ASSISTANT_FORM,
   normalizeAssistantFormValues,
 } from "../../components/AssistantFormModal";
+import SupabaseAssistantScreen from '../../components/SupabaseAssistantScreen';
+import { isSupabaseDataSource } from '../../config/dataSource';
 
 // Config & Utils
 import { fetchSheetData } from "../../utils/googleSheet_csv";
@@ -90,6 +92,10 @@ function secondsToHMS(totalSec: number): string {
 }
 
 export default function AssistantScreen() {
+  return isSupabaseDataSource ? <SupabaseAssistantScreen /> : <LegacyAssistantScreen />;
+}
+
+function LegacyAssistantScreen() {
   const [allData, setAllData] = useState<Assistant[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
