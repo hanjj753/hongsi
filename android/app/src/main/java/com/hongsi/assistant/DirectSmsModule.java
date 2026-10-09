@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
+import com.facebook.react.bridge.Promise;
 
 public class DirectSmsModule extends ReactContextBaseJavaModule {
     public DirectSmsModule(ReactApplicationContext reactContext) {
@@ -17,8 +18,12 @@ public class DirectSmsModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void sendDirectSms(String phoneNumber, String message) {
+    public void sendDirectSms(String phoneNumber, String message, Promise promise) {
         try {
+            if (phoneNumber == null || phoneNumber.trim().isEmpty() || message == null || message.trim().isEmpty()) {
+                promise.reject("INVALID_SMS", "Phone number and message are required");
+                return;
+            }
             SmsManager smsManager = SmsManager.getDefault();
             ArrayList<String> parts = smsManager.divideMessage(message);
 
@@ -29,9 +34,10 @@ public class DirectSmsModule extends ReactContextBaseJavaModule {
                 // 짧은 문자는 기존대로 전송
                 smsManager.sendTextMessage(phoneNumber, null, message, null, null);
             }
-
+            // The OS accepted the submission. Carrier delivery is not confirmed here.
+            promise.resolve(null);
         } catch (Exception ex) {
-            ex.printStackTrace();
+            promise.reject("SMS_SUBMISSION_FAILED", ex);
         }
     }
 }

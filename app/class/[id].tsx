@@ -26,6 +26,7 @@ import { useAppAccess } from "../../contexts/AppAccessContext";
 import { AppAccessGate } from "../../components/AppAccessGate";
 import { ClassStudentManager } from "../../components/ClassStudentManager";
 import SupabaseClassWorkPanel from "../../components/SupabaseClassWorkPanel";
+import SupabaseClassMessagingPanel from "../../components/SupabaseClassMessagingPanel";
 
 // PERMISSION_HEADERS 추가
 import { CSV_URLS, API_URLS, CLASSES_HEADERS, ATTENDANCE_LOG_HEADERS, MESSAGE_LOG_HEADERS,
@@ -1254,6 +1255,13 @@ function ClassDetailScreen() {
         </View>
 
         {isSupabaseDataSource && <SupabaseClassWorkPanel classId={targetId} />}
+        {isSupabaseDataSource && <SupabaseClassMessagingPanel
+          classId={targetId}
+          classLabel={String(row.__classLabel || classTitle)}
+          termLabel={String(row[CLASSES_HEADERS.QUARTER] ?? '')}
+          day={String(row[CLASSES_HEADERS.DAY] ?? '')}
+          canManage={isAdmin || isManager}
+        />}
         {!isSupabaseDataSource && <>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>출근 관리</Text>

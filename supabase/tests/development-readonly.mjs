@@ -13,6 +13,7 @@ for (const path of [
   'class_terms?select=label,is_active&order=label.desc',
   'locations?select=id,name,latitude,longitude,notes&order=name.asc',
   'session_participants?select=session_id,student_id&limit=1',
+  'message_deliveries?select=message_id%2Cmessage%3Amessages!inner%28class_id%29&status=eq.pending&message.class_id=eq.1',
 ]) {
   const r = await fetch(`${url}/rest/v1/${path}`, { headers: { apikey:key }, signal:AbortSignal.timeout(15000) });
   assert.ok([401,403].includes(r.status), `Expected anonymous denial, received ${r.status}`);
@@ -24,6 +25,16 @@ for (const [name, body] of [
   ['link_my_staff_account', {}],
   ['start_my_work_shift', { target_class_id: 1 }],
   ['finish_my_work_shift', {}],
+  ['get_class_work_summary', { target_class_id: 1 }],
+  ['admin_save_staff_bank_account', { target_staff_id: 1, target_bank_account: 'DENIED' }],
+  ['register_sending_device', { device_label: 'DENIED', android_identifier: 'DENIED' }],
+  ['reset_sending_device', { target_device_id: '00000000-0000-4000-8000-000000000000' }],
+  ['get_sending_device_state', { target_device_id: '00000000-0000-4000-8000-000000000000', device_secret: 'DENIED' }],
+  ['create_class_messages', { target_class_id: 1, target_session_id: null, message_items: [] }],
+  ['claim_next_message_delivery', { target_class_id: 1, target_device_id: '00000000-0000-4000-8000-000000000000', device_secret: 'DENIED' }],
+  ['finish_message_delivery', { target_message_id: 1, target_recipient_type: 'parent', target_device_id: '00000000-0000-4000-8000-000000000000', device_secret: 'DENIED', delivery_result: 'failed', error_message: 'DENIED' }],
+  ['cancel_pending_class_messages', { target_class_id: 1 }],
+  ['delete_managed_location', { target_location_id: 1 }],
   ['register_student_and_enroll', {
     target_class_id: 1, target_student_id: null, new_student_code: 'DENIED', new_full_name: 'DENIED',
     new_student_phone: '', new_parent_phone: '', new_email: '', new_default_message_recipients: 'parent', new_joined_on: null,

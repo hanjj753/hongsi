@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from './ReadablePicker';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import { getWorkLogs, type WorkLog } from '../lib/staffData';
 

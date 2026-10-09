@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, Alert, ActivityIndicator, Platform, RefreshControl } from 'react-native';
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
+import { isSupabaseDataSource } from '../../config/dataSource';
+import SupabaseInquiryScreen from '../../components/SupabaseInquiryScreen';
 
 // Utils & Config
 import { getCurrentUserEmail } from "../../utils/currentUser";
@@ -9,7 +11,7 @@ import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { postSheetData } from "../../utils/sheetApi";
 import { CSV_URLS, API_URLS, SHEET_NAMES, ASSISTANT_HEADERS, PERMISSION_HEADERS, INQUIRY_HEADERS } from "../../config/sheetConfig";
 
-export default function InquiryScreen() {
+function LegacyInquiryScreen() {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   
@@ -357,4 +359,6 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#4F46E5' },
   chipText: { fontSize: 13, fontWeight: '600', color: '#4B5563' },
   chipTextActive: { color: '#fff' },
-});
+});export default function InquiryScreen() {
+  return isSupabaseDataSource ? <SupabaseInquiryScreen /> : <LegacyInquiryScreen />;
+}

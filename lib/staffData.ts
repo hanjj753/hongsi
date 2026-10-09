@@ -31,6 +31,15 @@ export type WorkLog = {
   notes: string;
 };
 
+export type ClassWorkSummary = {
+  id: string;
+  staffName: string;
+  workDate: string;
+  startedAt: string;
+  endedAt: string | null;
+  durationMinutes: number | null;
+};
+
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -54,11 +63,11 @@ function mapWorkLog(row: any): WorkLog {
   };
 }
 
-export async function getStaffDirectory(isAdmin: boolean): Promise<StaffProfile[]> {
+export async function getStaffDirectory(isAdmin: boolean, canViewBank: boolean): Promise<StaffProfile[]> {
   const [staffResult, accessResult, bankResult] = await Promise.all([
     getSupabase().from('staff').select('id,full_name,email,phone,positions,duties,employment_status,started_on,notes,firebase_uid').order('full_name'),
     isAdmin ? getSupabase().from('app_access').select('staff_id,app_role,access_status') : Promise.resolve({ data: [], error: null }),
-    isAdmin ? getSupabase().from('staff_private_details').select('staff_id,bank_account') : Promise.resolve({ data: [], error: null }),
+    canViewBank ? getSupabase().from('staff_private_details').select('staff_id,bank_account') : Promise.resolve({ data: [], error: null }),
   ]);
   const error = staffResult.error || accessResult.error || bankResult.error;
   if (error) throw error;
@@ -75,8 +84,8 @@ export async function getStaffDirectory(isAdmin: boolean): Promise<StaffProfile[
       employmentStatus: row.employment_status === 'inactive' ? 'inactive' : 'active',
       startedOn: String(row.started_on ?? ''), notes: String(row.notes ?? ''),
       linked: Boolean(row.firebase_uid),
+      ...(canViewBank ? { bankAccount: String(bank?.bank_account ?? '') } : {}),
       ...(isAdmin ? {
-        bankAccount: String(bank?.bank_account ?? ''),
         appRole: account?.app_role,
         accessStatus: account?.access_status,
       } : {}),
@@ -107,9 +116,10 @@ export async function saveStaffProfile(id: string | null, draft: StaffDraft, isA
 }
 
 export async function saveStaffBankAccount(staffId: string, bankAccount: string): Promise<void> {
-  const { error } = await getSupabase().from('staff_private_details').upsert({
-    staff_id: staffId, bank_account: bankAccount.trim() || null,
-  }, { onConflict: 'staff_id' });
+  const { error } = await getSupabase().rpc('admin_save_staff_bank_account', {
+    target_staff_id: staffId,
+    target_bank_account: bankAccount,
+  });
   if (error) throw error;
 }
 
@@ -133,6 +143,19 @@ export async function getOpenWorkLog(staffId: string): Promise<WorkLog | null> {
     .eq('staff_id', staffId).is('ended_at', null).maybeSingle();
   if (error) throw error;
   return data ? mapWorkLog(data) : null;
+}
+
+export async function getClassWorkSummary(classId: string, offset = 0, pageSize = 50): Promise<ClassWorkSummary[]> {
+  const { data, error } = await getSupabase()
+    .rpc('get_class_work_summary', { target_class_id: classId })
+    .order('started_at', { ascending: false })
+    .range(offset, offset + pageSize - 1);
+  if (error) throw error;
+  return (data ?? []).map((row: any) => ({
+    id: String(row.work_log_id), staffName: String(row.staff_name), workDate: String(row.work_date),
+    startedAt: String(row.started_at), endedAt: row.ended_at == null ? null : String(row.ended_at),
+    durationMinutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
+  }));
 }
 
 export async function startMyWorkShift(classId: string): Promise<void> {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Picker } from './ReadablePicker';
+import SupabaseSendingDeviceManager from './SupabaseSendingDeviceManager';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import { setAccountAccess, type AccessStatus, type AppRole } from '../utils/appAccess';
 import {
@@ -19,6 +20,13 @@ const blankWork = (staffId: string): WorkLogDraft => ({
 });
 const roleLabels = { assistant: '조교', manager: '매니저', admin: '관리자' };
 const statusLabels = { pending: '승인 대기', approved: '승인됨', suspended: '중지됨' };
+
+function positionRank(item: StaffProfile): number {
+  if (item.positions.includes('CEO')) return 0;
+  if (item.positions.includes('실장')) return 1;
+  if (item.positions.includes('조교')) return 2;
+  return 3;
+}
 
 function timeInKorea(value: string) {
   const date = new Date(Date.parse(value) + 9 * 3600000).toISOString();
@@ -70,17 +78,23 @@ export default function SupabaseAssistantScreen() {
   const [editingWork, setEditingWork] = useState<WorkLog | null>(null);
   const [workDraft, setWorkDraft] = useState<WorkLogDraft>(blankWork(''));
   const [workForm, setWorkForm] = useState(false);
+  const [permissionInfoHovered, setPermissionInfoHovered] = useState(false);
+  const [permissionInfoPinned, setPermissionInfoPinned] = useState(false);
+  const [showField, setShowField] = useState(true);
+  const [showMaterial, setShowMaterial] = useState(true);
 
   const load = useCallback(async () => {
-    try { setError(''); setStaff(await getStaffDirectory(Boolean(isAdmin))); }
+    try { setError(''); setStaff(await getStaffDirectory(Boolean(isAdmin), Boolean(canManage))); }
     catch (cause: any) { setError(cause?.message || '조교 정보를 불러오지 못했습니다.'); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [isAdmin]);
+  }, [isAdmin, canManage]);
   useEffect(() => { void load(); }, [load]);
 
-  const ordered = useMemo(() => [...staff].sort((a, b) =>
-    Number(a.employmentStatus === 'inactive') - Number(b.employmentStatus === 'inactive')
-    || a.fullName.localeCompare(b.fullName, 'ko')), [staff]);
+  const ordered = useMemo(() => staff.filter((item) => positionRank(item) < 2 || item.duties.length === 0
+    || (showField && item.duties.includes('현장')) || (showMaterial && item.duties.includes('자료'))).sort((a, b) =>
+    positionRank(a) - positionRank(b)
+    || Number(a.employmentStatus === 'inactive') - Number(b.employmentStatus === 'inactive')
+    || a.fullName.localeCompare(b.fullName, 'ko')), [staff, showField, showMaterial]);
   const months = useMemo(() => [...new Set(workLogs.map((log) => log.workDate.slice(0, 7)))].sort().reverse(), [workLogs]);
   const monthLogs = workLogs.filter((log) => log.workDate.startsWith(workMonth));
   const totalMinutes = monthLogs.reduce((sum, log) => sum + (log.durationMinutes ?? 0), 0);
@@ -185,10 +199,30 @@ export default function SupabaseAssistantScreen() {
     <ScrollView contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}>
       <View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.title}>조교</Text><Text style={styles.muted}>조교 정보와 근무 기록</Text></View>
+        <Pressable accessibilityRole="button" accessibilityLabel="앱 권한 안내"
+          onHoverIn={() => setPermissionInfoHovered(true)} onHoverOut={() => setPermissionInfoHovered(false)}
+          onPress={() => setPermissionInfoPinned((open) => !open)} style={styles.helpButton}>
+          <Text style={styles.helpText}>권한 안내 ⓘ</Text>
+        </Pressable>
         {canManage && <Button label="+ 조교 추가" primary onPress={() => openStaffForm(null)} />}</View>
+      {(permissionInfoHovered || permissionInfoPinned) && <View style={styles.permissionInfo}>
+        <Text style={styles.permissionTitle}>앱 권한 안내</Text>
+        <Text style={styles.permissionText}>조교: 모든 수업의 학생 기록 조회·입력, 본인 근무 기록 조회</Text>
+        <Text style={styles.permissionText}>매니저: 조교 정보·근무 기록 관리, 계좌 조회, 발송 기기 등록</Text>
+        <Text style={styles.permissionText}>관리자: 매니저 권한에 더해 계좌 수정, 계정 승인·중지</Text>
+        <Text style={styles.permissionFootnote}>직책(CEO·실장·조교)과 앱 권한은 별개입니다.</Text>
+      </View>}
+      {canManage && <SupabaseSendingDeviceManager />}
       {!!error && <Text style={styles.error}>{error}</Text>}
       {!!notice && <Text style={styles.notice}>{notice}</Text>}
-      {ordered.length === 0 && <Text style={styles.empty}>등록된 조교가 없습니다.</Text>}
+      <View style={styles.actions}>
+        <Pressable style={[styles.chip, showField && styles.selected]} onPress={() => setShowField((value) => !value)}>
+          <Text> {showField ? '☑' : '☐'} 현장</Text>
+        </Pressable>
+        <Pressable style={[styles.chip, showMaterial && styles.selected]} onPress={() => setShowMaterial((value) => !value)}>
+          <Text> {showMaterial ? '☑' : '☐'} 자료</Text>
+        </Pressable>
+      </View>      {ordered.length === 0 && <Text style={styles.empty}>등록된 조교가 없습니다.</Text>}
       {ordered.map((item) => <View key={item.id} style={[styles.card, item.employmentStatus === 'inactive' && styles.inactive]}>
         <View style={styles.row}><View style={{ flex: 1 }}><Text style={styles.name}>{item.fullName}</Text><Text style={styles.muted}>{item.positions.join(' · ') || '직책 미입력'} · {item.duties.join(' · ') || '업무 미입력'}</Text></View>
           {item.employmentStatus === 'inactive' && <Text style={styles.muted}>비근무</Text>}</View>
@@ -196,9 +230,11 @@ export default function SupabaseAssistantScreen() {
         {!!item.startedOn && <Text style={styles.muted}>근무 시작 {item.startedOn}</Text>}
         {isAdmin && <Text style={styles.muted}>앱 계정: {item.linked ? statusLabels[item.accessStatus ?? 'pending'] : '로그인 연결 전'}{item.appRole ? ' · ' + roleLabels[item.appRole] : ''}</Text>}
         <View style={styles.actions}>
+          {!!item.phone && <Button label="전화" onPress={() => void Linking.openURL(`tel:${item.phone.replace(/\D/g, '')}`)} />}
+          {!!item.phone && <Button label="문자" onPress={() => void Linking.openURL(`sms:${item.phone.replace(/\D/g, '')}`)} />}
           {(canManage || access?.staff_id === item.id) && <Button label="근무 기록" onPress={() => openWork(item)} />}
           {canManage && <Button label="정보 수정" onPress={() => openStaffForm(item)} />}
-          {isAdmin && <Button label="계좌" onPress={() => { setBankTarget(item); setBankDraft(item.bankAccount ?? ''); }} />}
+          {canManage && <Button label={isAdmin ? '계좌 수정' : '계좌 조회'} onPress={() => { setBankTarget(item); setBankDraft(item.bankAccount ?? ''); }} />}
           {isAdmin && item.id !== access?.staff_id && <Button label="앱 권한" onPress={() => { setAccessTarget(item); setRoleDraft(item.appRole ?? 'assistant'); setStatusDraft(item.accessStatus ?? 'pending'); }} />}
         </View>
       </View>)}
@@ -210,8 +246,8 @@ export default function SupabaseAssistantScreen() {
         {!!error && <Text style={styles.error}>{error}</Text>}
         <ScrollView keyboardShouldPersistTaps="handled">
           <Field label="이름" value={staffDraft.fullName} onChange={(fullName) => setStaffDraft({ ...staffDraft, fullName })} />
-          <Field label="이메일" value={staffDraft.email} keyboardType="email-address" onChange={(email) => setStaffDraft({ ...staffDraft, email })} />
-          <Field label="전화번호" value={staffDraft.phone} keyboardType="phone-pad" onChange={(phone) => setStaffDraft({ ...staffDraft, phone })} />
+          <Field label="이메일" value={staffDraft.email} placeholder="assistant@example.com" keyboardType="email-address" onChange={(email) => setStaffDraft({ ...staffDraft, email })} />
+          <Field label="전화번호" value={staffDraft.phone} placeholder="010-1234-5678" keyboardType="phone-pad" onChange={(phone) => setStaffDraft({ ...staffDraft, phone })} />
           <Text style={styles.label}>직책</Text><View style={styles.actions}>{['CEO', '실장', '조교'].map((position) =>
             <Pressable key={position} style={[styles.chip, staffDraft.positions.includes(position) && styles.selected]}
               onPress={() => setStaffDraft({ ...staffDraft, positions: staffDraft.positions.includes(position) ? staffDraft.positions.filter((value) => value !== position) : [...staffDraft.positions, position] })}><Text>{position}</Text></Pressable>)}</View>
@@ -229,8 +265,9 @@ export default function SupabaseAssistantScreen() {
     <Modal visible={Boolean(bankTarget)} transparent animationType="fade" onRequestClose={() => setBankTarget(null)}>
       <View style={styles.overlay}><View style={styles.smallModal}><Text style={styles.modalTitle}>{bankTarget?.fullName} 계좌 정보</Text>
         {!!error && <Text style={styles.error}>{error}</Text>}
-        <Field label="계좌번호" value={bankDraft} onChange={setBankDraft} />
-        <View style={styles.actions}><Button label="취소" onPress={() => setBankTarget(null)} /><Button label="저장" primary disabled={busy} onPress={() => void saveBank()} /></View>
+        {isAdmin ? <Field label="계좌번호" value={bankDraft} onChange={setBankDraft} />
+          : <Text selectable style={styles.bankValue}>{bankDraft || '등록된 계좌가 없습니다.'}</Text>}
+        <View style={styles.actions}><Button label="닫기" onPress={() => setBankTarget(null)} />{isAdmin && <Button label="저장" primary disabled={busy} onPress={() => void saveBank()} />}</View>
       </View></View>
     </Modal>
 
@@ -285,6 +322,13 @@ const styles = StyleSheet.create({
   muted: { color: '#6B7280', fontSize: 12, marginTop: 3 }, detail: { color: '#374151', fontSize: 13, marginTop: 7 },
   card: { padding: 16, backgroundColor: '#FFFFFF', borderRadius: 13, borderWidth: 1, borderColor: '#E5E7EB', gap: 5 },
   inactive: { opacity: 0.65 }, row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  helpButton: { paddingHorizontal: 10, paddingVertical: 10, borderRadius: 8, backgroundColor: '#EEF2FF' },
+  helpText: { color: '#4338CA', fontWeight: '800', fontSize: 12 },
+  permissionInfo: { alignSelf: 'flex-end', maxWidth: 460, padding: 14, borderRadius: 10, backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE' },
+  permissionTitle: { color: '#312E81', fontWeight: '800', marginBottom: 6 },
+  permissionText: { color: '#374151', lineHeight: 21, fontSize: 13 },
+  permissionFootnote: { color: '#6B7280', marginTop: 6, fontSize: 12 },
+  bankValue: { color: '#111827', fontSize: 16, paddingVertical: 16 },
   actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 },
   button: { paddingHorizontal: 11, paddingVertical: 9, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF', borderRadius: 9 },
   primary: { backgroundColor: '#4F46E5', borderColor: '#4F46E5' }, disabled: { opacity: 0.5 },

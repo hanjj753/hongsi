@@ -3,7 +3,10 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, RefreshControl, Pressable, Linking } from "react-native";
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
 import { Calendar, LocaleConfig } from 'react-native-calendars';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../../components/ReadablePicker';
+import { useRouter } from 'expo-router';
+import { isSupabaseDataSource } from '../../config/dataSource';
+import { getSupabaseCalendarWorkspace } from '../../lib/calendarData';
 
 import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { CSV_URLS, SCHEDULE_HEADERS, ASSISTANT_HEADERS, CLASSES_HEADERS } from "../../config/sheetConfig";
@@ -56,6 +59,7 @@ type CalEvent = {
   quarter?: string; // 필터링용 분기 추가
   color?: string;
   workers?: string;
+  eventDate?: string;
 };
 
 // ... (헬퍼 함수들: addDays, formatTimeHM 등 기존 유지) ...
@@ -70,6 +74,7 @@ function formatTimeHM(iso: string) {
 // ...
 
 export default function CalendarScreen() {
+  const router = useRouter();
   const [selectedDate, setSelectedDate] = useState(getLocalDateString(new Date().toISOString()));
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,6 +95,19 @@ export default function CalendarScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
+      if (isSupabaseDataSource) {
+        const workspace = await getSupabaseCalendarWorkspace();
+        setActiveAssistants(workspace.assistants);
+        setAllClasses(workspace.classes);
+        const quarters = [...new Set(workspace.classes.map((item) => item.quarter))].sort().reverse();
+        setSelectedQuarter((current) => quarters.includes(current) ? current : quarters[0] ?? 'ALL');
+        const ids = workspace.classes.map((item) => item.id).sort();
+        setEvents(workspace.events.map((item) => ({
+          ...item, type: 'class' as const, eventDate: item.date,
+          color: getClassColor(item.classId, ids.indexOf(item.classId)),
+        })).sort((a, b) => a.start.localeCompare(b.start)));
+        return;
+      }
       let icalEvents: CalEvent[] = []; // iCal 로직 생략
 
       const aData = await fetchSheetData(CSV_URLS.ASSISTANT_INFO);
@@ -251,7 +269,7 @@ export default function CalendarScreen() {
       return a.day.localeCompare(b.day);
     });
     return filtered.map(c => ({
-      label: `${c.name} ${c.day}`, 
+      label: isSupabaseDataSource ? c.name : `${c.name} ${c.day}`,
       value: c.id
     }));
   }, [allClasses, selectedQuarter]);
@@ -283,7 +301,7 @@ export default function CalendarScreen() {
         if (!isWorkerMatched(ev)) return;
       }
 
-      const dateStr = getLocalDateString(ev.start);
+      const dateStr = ev.eventDate ?? getLocalDateString(ev.start);
       if (!marks[dateStr]) marks[dateStr] = { marked: true, dots: [] };
       
       // 색상 선택: 특정 수업 선택 시엔 주황색 고정, "전체 수업" 시엔 각 수업 고유 색상
@@ -313,7 +331,7 @@ export default function CalendarScreen() {
   const selectedDayEvents = useMemo(() => {
     if (!selectedDate) return [];
     return events.filter(e => {
-      if (getLocalDateString(e.start) !== selectedDate) return false;
+      if ((e.eventDate ?? getLocalDateString(e.start)) !== selectedDate) return false;
       if (e.type === 'class') {
         if (e.quarter !== selectedQuarter) return false;
         if (selectedClassId !== "ALL" && e.classId !== selectedClassId) return false;
@@ -356,6 +374,10 @@ export default function CalendarScreen() {
   };
 
   const openEvent = async (ev: CalEvent) => {
+    if (isSupabaseDataSource && ev.classId && ev.id.startsWith('session-')) {
+      router.push({ pathname: '/session/[id]', params: { id: ev.id.slice(8), classId: ev.classId, title: ev.title } });
+      return;
+    }
     if (ev.url) { await Linking.openURL(ev.url); return; }
     const m = (ev.description || "").match(/https?:\/\/\S+/);
     if (m?.[0]) await Linking.openURL(m[0]);
@@ -486,7 +508,7 @@ export default function CalendarScreen() {
                 {groupedClassEvents[cId].map((ev, i) => (
                 <Pressable key={i} onPress={() => openEvent(ev)} style={({ pressed }) => [styles.item, styles.itemCompact, pressed && { opacity: 0.85 }]}>
                     {/* 날짜 뱃지 */}
-                    <Text style={styles.dateBadge}>{getLocalDateString(ev.start).slice(5)}</Text>
+                    <Text style={styles.dateBadge}>{(ev.eventDate ?? getLocalDateString(ev.start)).slice(5)}</Text>
                     
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemTitle}>{ev.title}</Text>
@@ -522,8 +544,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: "800", color: "#111827" },
   
   label: { fontSize: 12, color: "#6B7280", fontWeight: "700", marginBottom: 6, marginLeft: 2 },
-  pickerContainer: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', height: 50, justifyContent: 'center' },
-  picker: { width: '100%', height: 50 },
+  pickerContainer: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', height: 56, justifyContent: 'center' },
+  picker: { width: '100%', height: 56 },
 
   muted: { color: "#6B7280", fontSize: 13 },
   calendarWrapper: { width: "92%", backgroundColor: "#fff", borderRadius: 16, overflow: "hidden", elevation: 2, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 10, marginBottom: 20 },

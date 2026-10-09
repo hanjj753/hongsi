@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../../components/ReadablePicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -859,7 +859,7 @@ const styles = StyleSheet.create({
   linkedMakeupBadge: { alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999, overflow: 'hidden', color: '#6D28D9', backgroundColor: '#EDE9FE', fontSize: 10, fontWeight: '800' },
   removeMakeupText: { marginTop: 6, color: '#DC2626', fontSize: 10, fontWeight: '700' },
   pickerFrame: { overflow: 'hidden', borderRadius: 8, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF' },
-  picker: { height: 40, color: '#111827', backgroundColor: '#FFFFFF' },
+  picker: { height: 54, color: '#111827', backgroundColor: '#FFFFFF' },
   gridInput: { minHeight: 37, paddingHorizontal: 8, borderRadius: 7, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF', color: '#111827', fontSize: 12 },
   makeupRow: { flexDirection: 'row', gap: 5, marginBottom: 5 },
   linkedMakeupInfo: { padding: 9, borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F5F3FF' },

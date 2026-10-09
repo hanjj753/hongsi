@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Platform, Image, TouchableOpacity, Alert, ScrollView, RefreshControl, ActivityIndicator, Modal, TextInput, KeyboardAvoidingView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../../components/ReadablePicker';
 import * as Application from 'expo-application';
 import AssistantFormModal, {
   AssistantFormValues,
@@ -429,6 +429,10 @@ export default function HomeScreen() {
               <InfoItem label="이름" value={user.displayName || "이름 없음"} />
               <InfoItem label="이메일" value={user.email} />
             </View>
+            {isSupabaseDataSource && <View style={styles.roleRow}>
+              <Text style={styles.roleLabel}>앱 권한</Text>
+              <Text style={styles.roleValue}>{access?.app_role === 'admin' ? '관리자' : access?.app_role === 'manager' ? '매니저' : access?.app_role === 'assistant' ? '조교' : '승인 대기'}</Text>
+            </View>}
 
             {/* Admin인 경우에만 보이는 버튼 */}
             {!isSupabaseDataSource && isAdmin && (
@@ -602,6 +606,8 @@ const styles = StyleSheet.create({
   card: { width: '100%', maxWidth: 500, backgroundColor: 'white', borderRadius: 16, padding: 20, elevation: 3 },
   avatar: { width: 80, height: 80, borderRadius: 40, alignSelf: 'center', marginBottom: 16, backgroundColor: '#eee' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  roleRow: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 9, backgroundColor: '#EEF2FF' },
+  roleLabel: { color: '#6B7280', fontSize: 13 }, roleValue: { color: '#3730A3', fontWeight: '800', fontSize: 14 },
   label: { fontSize: 13, color: '#888', marginBottom: 4 },
   value: { fontSize: 16, fontWeight: '600', color: '#333' },
 

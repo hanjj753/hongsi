@@ -14,7 +14,7 @@ interface DirectSmsInterface {
    * * @param phoneNumber - 수신자 전화번호
    * @param msg - 보낼 메시지 내용
    */
-  sendDirectSms(phoneNumber: string, msg: string): void;
+  sendDirectSms(phoneNumber: string, msg: string): Promise<void>;
 }
 
 // 타입 단언(Type Assertion)을 통해 내보냅니다.

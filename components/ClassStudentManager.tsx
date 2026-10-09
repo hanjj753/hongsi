@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from './ReadablePicker';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,

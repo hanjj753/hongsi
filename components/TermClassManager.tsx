@@ -1,5 +1,5 @@
 import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from './ReadablePicker';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
   permanentDeleteButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 7, backgroundColor: '#FEE2E2' }, permanentDeleteText: { color: '#991B1B', fontWeight: '800', fontSize: 12 },
   classCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, marginBottom: 8, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FFFFFF' }, archivedCard: { backgroundColor: '#F9FAFB', opacity: 0.8 }, classCardBody: { flex: 1 }, classTitle: { color: '#111827', fontSize: 15, fontWeight: '800' }, classMeta: { marginTop: 5, color: '#6B7280', fontSize: 12 }, archivedLabel: { marginTop: 5, color: '#9CA3AF', fontSize: 11 }, emptyText: { color: '#6B7280', paddingVertical: 14 },
   classForm: { paddingTop: 15, paddingBottom: 22 }, label: { marginTop: 11, marginBottom: 6, color: '#374151', fontSize: 12, fontWeight: '800' }, twoColumns: { flexDirection: 'row', gap: 10 }, field: { flex: 1 },
-  pickerFrame: { minHeight: 45, justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, backgroundColor: '#FFFFFF' }, picker: { height: 45, color: '#111827', backgroundColor: '#FFFFFF' },
+  pickerFrame: { minHeight: 56, justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, backgroundColor: '#FFFFFF' }, picker: { height: 56, color: '#111827', backgroundColor: '#FFFFFF' },
   weekdays: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, weekday: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#F3F4F6' }, weekdayActive: { backgroundColor: '#4F46E5' }, weekdayText: { color: '#4B5563', fontWeight: '700' }, weekdayTextActive: { color: '#FFFFFF' },
   scheduleFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 15 }, scheduleDays: { flexGrow: 1, minWidth: 250 }, schedulePart: { flexGrow: 1, minWidth: 190 },
   dayParts: { flexDirection: 'row', gap: 7 }, dayPart: { paddingHorizontal: 12, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#F3F4F6' }, dayPartActive: { backgroundColor: '#4F46E5' }, dayPartText: { color: '#4B5563', fontWeight: '700' }, dayPartTextActive: { color: '#FFFFFF' },

@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking, TouchableOpacity, RefreshControl, Alert, Modal, Platform, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '../../components/ReadablePicker';
 import AssistantFormModal, {
   AssistantFormValues,
   EMPTY_ASSISTANT_FORM,

@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Picker } from "@react-native-picker/picker";
+import { Picker } from "./ReadablePicker";
 
 export type AssistantFormValues = {
   position: string;
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   label: { color: "#4B5563", fontSize: 12, fontWeight: "700", marginBottom: 6 },
   input: {
     width: "100%",
-    height: 50,
+    height: 56,
     borderWidth: 1,
     borderColor: "#D1D5DB",
     borderRadius: 8,
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   pickerContainer: {
-    height: 50,
+    height: 56,
     justifyContent: "center",
     overflow: "hidden",
     borderWidth: 1,
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#F9FAFB",
   },
-  picker: { width: "100%", height: 50, color: "#111827", backgroundColor: "transparent" },
+  picker: { width: "100%", height: 56, color: "#111827", backgroundColor: "transparent" },
   roleGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   roleOption: {
     flexBasis: "47%",

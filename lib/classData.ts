@@ -370,6 +370,10 @@ export async function saveSupabaseLocation(input: { id?: string; name: string; l
   if (error) throw error;
 }
 
+export async function deleteSupabaseLocation(id: string): Promise<void> {
+  const { error } = await getSupabase().rpc('delete_managed_location', { target_location_id: id });
+  if (error) throw error;
+}
 export async function getSupabaseClassDetail(classId: string): Promise<{ row: AnyRow | null; schedules: AnyRow[] }> {
   const normalizedClassId = String(classId).trim();
   if (!/^[1-9]\d*$/.test(normalizedClassId)) return { row: null, schedules: [] };

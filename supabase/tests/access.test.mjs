@@ -25,7 +25,7 @@ try {
       $$ select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
     grant usage on schema public, auth to anon,authenticated;
     grant execute on function auth.jwt() to anon,authenticated;`);
-  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql']) {
+  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql','20261002001600_staff_bank_and_class_work_summary.sql','20261008001700_bank_save_and_minute_work_duration.sql','20261008001800_message_workflows.sql','20261008001900_session_assigned_message_claims.sql','20261008002000_delete_unused_location.sql']) {
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   await db.exec(`
@@ -68,6 +68,7 @@ try {
       await denied('select public.link_my_staff_account()');
       await denied('select public.start_my_work_shift(1)');
       await denied('select public.finish_my_work_shift()');
+      await denied('select * from public.get_class_work_summary(1)');
       await denied("select public.save_student_session_draft(2,2,1,'{}','[]','[]')");
       await denied("select public.save_session_roster_draft(2,2,'[]')");
       await denied("select public.save_class_term(null,'2026-TEST')");
@@ -144,13 +145,17 @@ try {
       assert.equal((await first('select count(*)::int n from student_test_results where test_id=1 and student_id=1')).n, 0);
     });
   });
-  await test('only admin sees bank details, including an assistants own account', async () => {
-    for (const uid of ['assistant-uid','manager-uid']) {
-      await actor(uid, async () => {
-        assert.equal((await db.query('select * from staff_private_details')).rows.length, 0);
-        await denied("insert into staff_private_details(staff_id,bank_account) values (2,'NOT ALLOWED')");
-      });
-    }
+  await test('managers can view but not edit bank details; assistants cannot view them', async () => {
+    await actor('assistant-uid', async () => {
+      assert.equal((await db.query('select * from staff_private_details')).rows.length, 0);
+      await denied("insert into staff_private_details(staff_id,bank_account) values (2,'NOT ALLOWED')");
+    });
+    await actor('manager-uid', async () => {
+      assert.equal((await db.query('select * from staff_private_details')).rows.length, 2);
+      await db.query("update staff_private_details set bank_account='NOT ALLOWED' where staff_id=3");
+      assert.equal((await first('select bank_account from staff_private_details where staff_id=3')).bank_account, 'TEST-OWN-ACCOUNT');
+      await denied("insert into staff_private_details(staff_id,bank_account) values (2,'NOT ALLOWED')");
+    });
     await actor('admin-uid', async () => assert.equal((await db.query('select * from staff_private_details')).rows.length, 2));
   });
   await test('manager and admin can register, enable, and disable a sending device; assistant cannot', async () => {
@@ -523,5 +528,94 @@ try {
       assert.equal((await first('select count(*)::int n from work_logs where id=$1', [shiftId])).n, 0);
     });
   });
-  console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
+  await test('all approved staff see class shift summaries without hourly rates', async () => {
+    await db.exec("insert into work_logs(staff_id,class_id,work_label,started_at,ended_at,hourly_rate_krw) values (2,1,'TEST','2026-10-01 18:00+09','2026-10-01 20:00+09',20000)");
+    await actor('assistant-uid', async () => {
+      const rows = (await db.query('select * from public.get_class_work_summary(1)')).rows;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].staff_name, '매니저');
+      assert.equal(rows[0].duration_minutes, 120);
+      assert.equal('hourly_rate_krw' in rows[0], false);
+      assert.equal((await db.query('select * from work_logs where staff_id=2')).rows.length, 0);
+    });
+    await actor('pending-uid', async () => await denied('select * from public.get_class_work_summary(1)'));
+  });
+  await test('admin bank saving inserts and updates while lower roles remain blocked', async () => {
+    await db.exec('set role anon');
+    try { await denied("select public.admin_save_staff_bank_account(2,'NO')"); }
+    finally { await db.exec('reset role'); }
+    for (const uid of ['assistant-uid', 'manager-uid']) {
+      await actor(uid, async () => await denied("select public.admin_save_staff_bank_account(3,'NO')"));
+    }
+    await actor('admin-uid', async () => {
+      await db.query("select public.admin_save_staff_bank_account(3,' REVISED-ACCOUNT ')");
+      assert.equal((await first('select bank_account from staff_private_details where staff_id=3')).bank_account, 'REVISED-ACCOUNT');
+      await db.query("select public.admin_save_staff_bank_account(2,'NEW-ACCOUNT')");
+      assert.equal((await first('select bank_account from staff_private_details where staff_id=2')).bank_account, 'NEW-ACCOUNT');
+    });
+  });
+  await test('work duration uses displayed clock minutes regardless of seconds', async () => {
+    await db.exec("insert into work_logs(staff_id,work_label,started_at,ended_at) values (2,'분 계산','2026-10-08 10:53:59+09','2026-10-08 10:59:01+09')");
+    assert.equal((await first("select duration_minutes from work_logs where work_label='분 계산'")).duration_minutes, 6);
+  });
+  await test('message queue binds recipients to snapshots and a paired approved device', async () => {
+    await db.exec("update students set parent_phone='01012345678',student_phone='01087654321',default_message_recipients='both' where id=1; update message_deliveries set status='cancelled' where message_id in (1,2)");
+    let pair;
+    await actor('assistant-uid', async () => {
+      pair = (await first("select public.register_sending_device('TEST PHONE','android-test-1') as pair")).pair;
+      assert.equal(pair.secret.length, 64);
+      await denied("select public.create_class_messages(2,2,'[]'::jsonb)");
+      const payload = JSON.stringify([{ student_id: 1, request_id: '11111111-1111-4111-8111-111111111111', content: 'TEST TEXT' }]);
+      assert.equal((await first('select public.create_class_messages(1,1,$1::jsonb) as result', [payload])).result.created, 1);
+      assert.equal((await first('select public.create_class_messages(1,1,$1::jsonb) as result', [payload])).result.already_created, 1);
+      await denied("select * from public.claim_next_message_delivery(1,'00000000-0000-4000-8000-000000000000','wrong')");
+    });
+    assert.equal((await db.query("select recipient_type from message_deliveries where message_id=(select id from messages where content='TEST TEXT')")).rows.length, 2);
+    await actor('manager-uid', async () => {
+      await db.query('update sending_devices set is_enabled=true where id=$1', [pair.device_id]);
+    });
+    await actor('assistant-uid', async () => {
+      const claimed = await first('select * from public.claim_next_message_delivery(1,$1,$2)', [pair.device_id, pair.secret]);
+      assert.equal(claimed.content, 'TEST TEXT');
+      assert.equal(claimed.phone, claimed.recipient_type === 'parent' ? '01012345678' : '01087654321');
+      await db.query("select public.finish_message_delivery($1,$2,$3,$4,'submitted',null)", [claimed.message_id, claimed.recipient_type, pair.device_id, pair.secret]);
+      const second = await first('select * from public.claim_next_message_delivery(1,$1,$2)', [pair.device_id, pair.secret]);
+      assert.notEqual(second.recipient_type, claimed.recipient_type);
+      await db.query("select public.finish_message_delivery($1,$2,$3,$4,'failed','TEST ERROR')", [second.message_id, second.recipient_type, pair.device_id, pair.secret]);
+      assert.equal((await first("select count(*)::int n from message_deliveries where message_id=$1 and status in ('submitted','failed')", [claimed.message_id])).n, 2);
+    });
+    await db.exec("update message_deliveries set status='pending' where message_id=2");
+    await actor('assistant-uid', async () => {
+      assert.equal(await first('select * from public.claim_next_message_delivery(2,$1,$2)', [pair.device_id, pair.secret]), undefined);
+    });
+    let otherClassClaim;
+    await actor('manager-uid', async () => {
+      otherClassClaim = await first('select * from public.claim_next_message_delivery(2,$1,$2)', [pair.device_id, pair.secret]);
+    });
+    await actor('assistant-uid', async () => {
+      await assert.rejects(db.query("select public.finish_message_delivery($1,$2,$3,$4,'failed','DENIED')", [otherClassClaim.message_id, otherClassClaim.recipient_type, pair.device_id, pair.secret]), e => e.code === 'P0002');
+    });
+    await actor('manager-uid', async () => {
+      await db.query("select public.finish_message_delivery($1,$2,$3,$4,'failed','TEST')", [otherClassClaim.message_id, otherClassClaim.recipient_type, pair.device_id, pair.secret]);
+    });
+    await db.exec("insert into session_staff(session_id,staff_id) values (2,3); update message_deliveries set status='pending' where message_id=2");
+    await actor('assistant-uid', async () => {
+      const sessionClaim = await first('select * from public.claim_next_message_delivery(2,$1,$2)', [pair.device_id, pair.secret]);
+      assert.equal(sessionClaim.message_id, otherClassClaim.message_id);
+      await db.query("select public.finish_message_delivery($1,$2,$3,$4,'failed','TEST')", [sessionClaim.message_id, sessionClaim.recipient_type, pair.device_id, pair.secret]);
+    });
+    await actor('manager-uid', async () => {
+      await db.query('select public.reset_sending_device($1)', [pair.device_id]);
+    });
+    await actor('assistant-uid', async () => await assert.rejects(db.query('select public.get_sending_device_state($1,$2)', [pair.device_id, pair.secret]), e => e.code === '42501'));
+  });
+  await test('manager deletes only unused locations while assistant and referenced locations are protected', async () => {
+    const unused = await first("insert into locations(name) values ('UNUSED LOCATION') returning id");
+    await actor('assistant-uid', async () => await denied(`select public.delete_managed_location(${unused.id})`));
+    await actor('manager-uid', async () => await db.query('select public.delete_managed_location($1)', [unused.id]));
+    assert.equal((await first('select count(*)::int n from locations where id=$1', [unused.id])).n, 0);
+    const used = await first("insert into locations(name) values ('USED LOCATION') returning id");
+    await db.query('update classes set location_id=$1 where id=1', [used.id]);
+    await actor('manager-uid', async () => await assert.rejects(db.query('select public.delete_managed_location($1)', [used.id]), e => e.code === '23503'));
+  });  console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
 } finally { await db.close(); }

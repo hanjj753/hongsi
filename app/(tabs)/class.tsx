@@ -4,7 +4,7 @@ import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, Activity
 import type { ViewStyle } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
-import { Picker } from "@react-native-picker/picker";
+import { Picker } from "../../components/ReadablePicker";
 import { useFocusEffect } from "@react-navigation/native";
 
 // Utils
@@ -14,10 +14,11 @@ import { getCurrentUserEmail } from "../../utils/currentUser";
 import { CSV_URLS, API_URLS, SHEET_NAMES, CLASSES_HEADERS, POSITIONS_HEADERS, PERMISSION_HEADERS } from "../../config/sheetConfig";
 import { getActiveSession, ActiveSession } from "../../utils/activeSession";
 import { isSupabaseDataSource } from "../../config/dataSource";
-import { getSupabaseClasses, getSupabaseLocations, saveSupabaseLocation } from "../../lib/classData";
+import { deleteSupabaseLocation, getSupabaseClasses, getSupabaseLocations, saveSupabaseLocation } from "../../lib/classData";
 import { useAppAccess } from "../../contexts/AppAccessContext";
 import { TermClassManager } from "../../components/TermClassManager";
 import { AllStudentRecords } from "../../components/AllStudentRecords";
+import { getOpenWorkLog, type WorkLog } from "../../lib/staffData";
 
 export default function ClassScreen() {
   const router = useRouter();
@@ -27,6 +28,7 @@ export default function ClassScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
+  const [supabaseOpenShift, setSupabaseOpenShift] = useState<WorkLog | null>(null);
   const [didAutoPick, setDidAutoPick] = useState(false);
   const [selectedQuarter, setSelectedQuarter] = useState<string>("ALL");
 
@@ -48,12 +50,16 @@ export default function ClassScreen() {
   const [saving, setSaving] = useState(false);
 
   useFocusEffect(useCallback(() => {
+    let active = true;
     if (isSupabaseDataSource) {
-      setActiveSession(null);
-      return;
+      if (access?.staff_id) getOpenWorkLog(String(access.staff_id))
+        .then((log) => { if (active) setSupabaseOpenShift(log); })
+        .catch((cause) => { if (active) setLoadError(cause?.message || '출근 상태를 불러오지 못했습니다.'); });
+    } else {
+      getActiveSession().then((session) => { if (active) setActiveSession(session); });
     }
-    (async () => { setActiveSession(await getActiveSession()); })();
-  }, []));
+    return () => { active = false; };
+  }, [access?.staff_id]));
 
   const load = useCallback(async () => {
     try {
@@ -100,7 +106,9 @@ export default function ClassScreen() {
     setRefreshing(true);
     try {
       await load();
-      setActiveSession(isSupabaseDataSource ? null : await getActiveSession());
+      if (isSupabaseDataSource) {
+        setSupabaseOpenShift(access?.staff_id ? await getOpenWorkLog(String(access.staff_id)) : null);
+      } else setActiveSession(await getActiveSession());
     } finally { setRefreshing(false); }
   };
 
@@ -170,13 +178,18 @@ export default function ClassScreen() {
 
   // 장소 삭제 핸들러
   const handleDeleteLocation = (placeName: string) => {
-    if (isSupabaseDataSource) {
-      showAlert("안내", "DB 장소 삭제는 참조 중인 수업을 보호하기 위해 아직 지원하지 않습니다.");
-      return;
-    }
+
     const processDelete = async () => {
       setSaving(true);
       try {
+        if (isSupabaseDataSource) {
+          if (!editLocationId) throw new Error('삭제할 장소 ID를 찾을 수 없습니다.');
+          await deleteSupabaseLocation(editLocationId);
+          showAlert("완료", "장소를 삭제했습니다.");
+          setEditModalVisible(false);
+          await load();
+          return;
+        }
         const res = await postSheetData(API_URLS.ATTENDANCE_LOG, SHEET_NAMES.POSITIONS, {
           action: "delete_location",
           place: placeName
@@ -188,9 +201,9 @@ export default function ClassScreen() {
         } else {
           showAlert("실패", res.error || "문제가 발생했습니다.");
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error(e);
-        showAlert("오류", "삭제 중 오류가 발생했습니다.");
+        showAlert("오류", e?.code === '23503' ? "이 장소를 사용하는 수업 또는 일정이 있어 삭제할 수 없습니다." : (e?.message || "삭제 중 오류가 발생했습니다."));
       } finally {
         setSaving(false);
       }
@@ -340,6 +353,14 @@ export default function ClassScreen() {
           </View>
         )}
 
+        {isSupabaseDataSource && supabaseOpenShift && (
+          <Pressable disabled={!supabaseOpenShift.classId} style={styles.openShiftBanner}
+            onPress={() => supabaseOpenShift.classId && router.push({ pathname: "/class/[id]", params: { id: supabaseOpenShift.classId } })}>
+            <Text style={styles.openShiftTitle}>현재 출근 중</Text>
+            <Text style={styles.openShiftText}>{supabaseOpenShift.workLabel} · {new Date(supabaseOpenShift.startedAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false })} 출근</Text>
+            {supabaseOpenShift.classId && <Text style={styles.openShiftHint}>눌러서 해당 수업으로 이동</Text>}
+          </Pressable>
+        )}
         {!isSupabaseDataSource && activeSession && (
           <Pressable style={styles.openShiftBanner} onPress={() => router.push({ pathname: "/class/[id]", params: { id: activeSession.classId } })}>
             <Text style={styles.openShiftTitle}>현재 출근 중</Text>
@@ -474,7 +495,7 @@ export default function ClassScreen() {
               </Pressable>
             </View>
 
-            {isEditMode && !isSupabaseDataSource && (
+            {isEditMode && (
               <Pressable onPress={() => handleDeleteLocation(editPlace)} style={{ marginTop: 15, alignSelf: 'center' }}>
                 <Text style={{ color: '#EF4444', fontWeight: '700' }}>이 장소 삭제하기</Text>
               </Pressable>
@@ -521,10 +542,10 @@ const styles = StyleSheet.create({
   openShiftHint: { marginTop: 6, fontSize: 12, color: "#6B7280" },
 
   pickerShell: { backgroundColor: "#fff", borderRadius: 14, borderWidth: 1, borderColor: "#E5E7EB" },
-  pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative", justifyContent: 'center', height: 50, paddingRight: 12, },
-  picker: { height: 50, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
+  pickerInner: { borderRadius: 14, overflow: "hidden", position: "relative", justifyContent: 'center', height: 56, paddingRight: 12, },
+  picker: { height: 56, width: "100%", color: "#111827", backgroundColor: "transparent", borderWidth: 0 },
   pickerWeb: { outlineStyle: "none", outlineWidth: 0, borderWidth: 0, paddingLeft: 15 } as ViewStyle & { outlineStyle: "none"; outlineWidth: number },
-  pickerChevron: { position: "absolute", right: 12, top: 0, height: 44, justifyContent: "center", alignItems: "center" },
+  pickerChevron: { position: "absolute", right: 12, top: 0, height: 56, justifyContent: "center", alignItems: "center" },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#fff', borderRadius: 16, padding: 20, maxHeight: '60%', elevation: 5 },
