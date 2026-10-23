@@ -25,7 +25,7 @@ try {
       $$ select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
     grant usage on schema public, auth to anon,authenticated;
     grant execute on function auth.jwt() to anon,authenticated;`);
-  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql','20261002001600_staff_bank_and_class_work_summary.sql','20261008001700_bank_save_and_minute_work_duration.sql','20261008001800_message_workflows.sql','20261008001900_session_assigned_message_claims.sql','20261008002000_delete_unused_location.sql']) {
+  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql','20261002001600_staff_bank_and_class_work_summary.sql','20261008001700_bank_save_and_minute_work_duration.sql','20261008001800_message_workflows.sql','20261008001900_session_assigned_message_claims.sql','20261008002000_delete_unused_location.sql','20261009002100_clinic_weekday_schedule.sql','20261011002200_database_usage.sql','20261016002300_test_question_sheets.sql']) {
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   await db.exec(`
@@ -57,8 +57,8 @@ try {
     select setval(pg_get_serial_sequence('classes','id'),2);
     select setval(pg_get_serial_sequence('class_sessions','id'),2);
   `);
-  await test('all migrations execute and retain RLS on all 22 tables', async () => {
-    assert.equal((await first("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and relkind='r' and relrowsecurity")).n, 22);
+  await test('all migrations execute and retain RLS on all 25 tables', async () => {
+    assert.equal((await first("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and relkind='r' and relrowsecurity")).n, 25);
   });
   await test('anonymous users have no table access or public privileged RPC', async () => {
     await db.exec('set role anon');
@@ -69,6 +69,9 @@ try {
       await denied('select public.start_my_work_shift(1)');
       await denied('select public.finish_my_work_shift()');
       await denied('select * from public.get_class_work_summary(1)');
+      await denied('select public.get_database_usage_bytes()');
+      await denied("select public.save_test_question_sheet(1,1,1,3,1,'[]'::jsonb)");
+      await denied('select * from public.test_question_sheets');
       await denied("select public.save_student_session_draft(2,2,1,'{}','[]','[]')");
       await denied("select public.save_session_roster_draft(2,2,'[]')");
       await denied("select public.save_class_term(null,'2026-TEST')");
@@ -341,7 +344,7 @@ try {
   await test('new sessions accept an explicit scheduled-worker list', async () => {
     await actor('manager-uid', async () => {
       assert.equal(Number((await first("select public.create_class_sessions(1,'[{\"session_number\":2,\"session_date\":\"2026-09-20\",\"staff_ids\":[2]}]') as n")).n), 1);
-      const newSession = await first('select id from class_sessions where class_id=1 and session_number=2');
+      const newSession = await first('select id from class_sessions where class_id=1 order by id desc limit 1');
       assert.deepEqual((await db.query('select staff_id from session_staff where session_id=$1 order by staff_id', [newSession.id])).rows, [{ staff_id: 2 }]);
     });
   });
@@ -617,5 +620,99 @@ try {
     const used = await first("insert into locations(name) values ('USED LOCATION') returning id");
     await db.query('update classes set location_id=$1 where id=1', [used.id]);
     await actor('manager-uid', async () => await assert.rejects(db.query('select public.delete_managed_location($1)', [used.id]), e => e.code === '23503'));
-  });  console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
+  });
+  await test('weekday times and chronological session numbers survive inserts, edits, and deletion', async () => {
+    await actor('assistant-uid', async () => await denied("select public.save_managed_class_v2(null,'TEST','regular','학교','과학',null,'[]'::jsonb,null,true,'{}'::bigint[])"));
+    await actor('manager-uid', async () => {
+      const schedule = JSON.stringify([
+        { weekday: 1, day_part: '오전', start_time: '09:00', end_time: '11:00' },
+        { weekday: 3, day_part: '저녁', start_time: '18:00', end_time: '20:00' },
+      ]);
+      const saved = await first("select public.save_managed_class_v2(null,'TEST','regular','시간고','과학',null,$1::jsonb,null,true,'{}'::bigint[]) as id", [schedule]);
+      const classId = saved.id;
+      assert.deepEqual((await db.query('select weekday,day_part,start_time::text from class_weekday_times where class_id=$1 order by weekday', [classId])).rows,
+        [{ weekday: 1, day_part: '오전', start_time: '09:00:00' }, { weekday: 3, day_part: '저녁', start_time: '18:00:00' }]);
+      await db.query('select public.create_class_sessions($1,$2::jsonb)', [classId, JSON.stringify([
+        { session_date: '2026-09-16', staff_ids: [] },
+        { session_date: '2026-09-14', staff_ids: [] },
+      ])]);
+      let sessions = (await db.query('select id,session_number,session_date::text,start_time::text from class_sessions where class_id=$1 order by session_number', [classId])).rows;
+      assert.deepEqual(sessions.map((item) => [item.session_number,item.session_date,item.start_time]),
+        [[1,'2026-09-14','09:00:00'],[2,'2026-09-16','18:00:00']]);
+      await db.query("select public.update_class_session($1,$2,'2026-09-07','moved','{}'::bigint[])", [classId,sessions[1].id]);
+      sessions = (await db.query('select id,session_number,session_date::text,start_time::text from class_sessions where class_id=$1 order by session_number', [classId])).rows;
+      assert.deepEqual(sessions.map((item) => [item.session_number,item.session_date,item.start_time]),
+        [[1,'2026-09-07','09:00:00'],[2,'2026-09-14','09:00:00']]);
+      await db.query('select public.delete_class_session($1,$2)', [classId,sessions[0].id]);
+      assert.equal((await first('select session_number from class_sessions where class_id=$1', [classId])).session_number, 1);
+    });
+  });
+  await test('one clinic per term accepts same-term students without changing enrollment', async () => {
+    let clinicId;
+    let sessionId;
+    await actor('manager-uid', async () => {
+      const schedule = JSON.stringify([{ weekday: 0, day_part: '오후', start_time: '14:00', end_time: '16:00' }]);
+      clinicId = (await first("select public.save_managed_class_v2(null,'TEST','clinic',null,null,null,$1::jsonb,null,true,'{}'::bigint[]) as id", [schedule])).id;
+      await assert.rejects(db.query('insert into enrollments(class_id,student_id) values ($1,1)', [clinicId]), e => e.code === '23514');
+      await assert.rejects(db.query("select public.save_managed_class_v2(null,'TEST','clinic',null,null,null,$1::jsonb,null,true,'{}'::bigint[])", [schedule]), e => e.code === '23505');
+      await db.query('select public.create_class_sessions($1,$2::jsonb)', [clinicId, JSON.stringify([{ session_date: '2026-09-20' }])]);
+      sessionId = (await first('select id from class_sessions where class_id=$1', [clinicId])).id;
+      await assert.rejects(db.query("select public.add_clinic_participant($1,$2,1,999,'')", [clinicId,sessionId]), e => e.code === '23514');
+      await db.query("select public.add_clinic_participant($1,$2,1,1,'optional visit')", [clinicId,sessionId]);
+    });
+    assert.equal((await first('select participation_type from session_participants where session_id=$1 and student_id=1', [sessionId])).participation_type, 'clinic');
+    assert.equal((await first('select count(*)::int n from enrollments where class_id=$1', [clinicId])).n, 0);
+    assert.equal((await first('select app_private.student_can_record($1,$2,1) as allowed', [clinicId,sessionId])).allowed, true);
+    await actor('assistant-uid', async () => {
+      await db.query("select public.save_student_session_draft($1,$2,1,$3::jsonb,'[]'::jsonb,'[]'::jsonb)",
+        [clinicId,sessionId,JSON.stringify({ status: '출석', notes: '클리닉 참석' })]);
+    });
+    assert.equal((await first('select attendance_status from student_session_records where class_id=$1 and session_id=$2 and student_id=1', [clinicId,sessionId])).attendance_status, '출석');
+    await actor('assistant-uid', async () => await assert.rejects(
+      db.query("select public.add_clinic_participant($1,$2,1,2,'')", [clinicId,sessionId]), e => e.code === '42501'));
+    await actor('manager-uid', async () => await db.query('select public.remove_makeup_participant($1,$2,1)', [clinicId,sessionId]));
+    assert.equal((await first('select count(*)::int n from student_session_records where class_id=$1 and session_id=$2', [clinicId,sessionId])).n, 0);
+    assert.equal((await first('select app_private.student_can_record($1,$2,1) as allowed', [clinicId,sessionId])).allowed, false);
+  });
+  await test('database usage is available only to approved management', async () => {
+    await actor('assistant-uid', async () => await denied('select public.get_database_usage_bytes()'));
+    await actor('pending-uid', async () => await denied('select public.get_database_usage_bytes()'));
+    await actor('manager-uid', async () => {
+      assert.ok(Number((await first('select public.get_database_usage_bytes() as bytes')).bytes) > 0);
+    });
+    await actor('admin-uid', async () => {
+      assert.ok(Number((await first('select public.get_database_usage_bytes() as bytes')).bytes) > 0);
+    });
+  });
+  await test('administrator can add a class shift with no end time and finish it later', async () => {
+    let id;
+    await actor('assistant-uid', async () => await denied("insert into work_logs(staff_id,class_id,work_label,started_at) values (3,1,'TEST CLASS','2026-10-11 10:00+09')"));
+    await actor('admin-uid', async () => {
+      id = (await first("insert into work_logs(staff_id,class_id,work_label,started_at) values (3,1,'TEST CLASS','2026-10-11 10:00+09') returning id")).id;
+      assert.equal((await first('select ended_at from work_logs where id=$1', [id])).ended_at, null);
+      await assert.rejects(db.query("insert into work_logs(staff_id,class_id,work_label,started_at) values (3,1,'TEST CLASS','2026-10-11 11:00+09')"), e => e.code === '23505');
+      await db.query("update work_logs set ended_at='2026-10-11 10:06+09' where id=$1", [id]);
+      assert.equal((await first('select duration_minutes from work_logs where id=$1', [id])).duration_minutes, 6);
+    });
+  });
+  await test('question sheet saves wrong numbers independently and rejects invalid students or questions', async () => {
+    await db.exec("insert into student_test_results(test_id,student_id,class_id,score) values (1,1,2,0) on conflict (test_id,student_id) do update set score=excluded.score");
+    await actor('assistant-uid', async () => {
+      await db.query(`select public.save_test_question_sheet(2,2,1,3,2,
+        '[{"student_id":"1","wrong_numbers":[2,5]}]'::jsonb)`);
+      assert.deepEqual((await first('select wrong_numbers from test_question_mistakes where test_id=1 and student_id=1')).wrong_numbers, [2,5]);
+      assert.equal((await first('select objective_count from test_question_sheets where test_id=1')).objective_count, 3);
+      await assert.rejects(db.query(`select public.save_test_question_sheet(2,2,1,3,2,
+        '[{"student_id":"1","wrong_numbers":[6]}]'::jsonb)`), e => e.code === '23514');
+      await assert.rejects(db.query(`select public.save_test_question_sheet(2,2,1,3,2,
+        '[{"student_id":"99","wrong_numbers":[]}]'::jsonb)`), e => e.code === '23514');
+      await assert.rejects(db.query(`select public.save_test_question_sheet(1,1,1,3,2,'[]'::jsonb)`), e => e.code === 'P0002');
+      assert.deepEqual((await first('select wrong_numbers from test_question_mistakes where test_id=1 and student_id=1')).wrong_numbers, [2,5]);
+      await db.query(`select public.save_test_question_sheet(2,2,1,3,2,
+        '[{"student_id":"1","wrong_numbers":[]}]'::jsonb)`);
+      assert.deepEqual((await first('select wrong_numbers from test_question_mistakes where test_id=1 and student_id=1')).wrong_numbers, []);
+      assert.equal((await first('select score from student_test_results where test_id=1 and student_id=1')).score, '0');
+    });
+  });
+  console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
 } finally { await db.close(); }

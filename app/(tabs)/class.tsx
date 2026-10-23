@@ -403,6 +403,13 @@ export default function ClassScreen() {
           const place = String(r[CLASSES_HEADERS.PLACE] ?? "").trim();
           const start = String(r[CLASSES_HEADERS.CLASS_START] ?? "").trim();
           const end = String(r[CLASSES_HEADERS.CLASS_END] ?? "").trim();
+          const timeLabel = isSupabaseDataSource && Array.isArray(r.__weekdaySchedule) && r.__weekdaySchedule.length
+            ? r.__weekdaySchedule.slice().sort((a: any, b: any) => Number(a.weekday) - Number(b.weekday)).map((entry: any) => {
+              const time = entry.start_time && entry.end_time
+                ? `${String(entry.start_time).slice(0, 5)} ~ ${String(entry.end_time).slice(0, 5)}` : '시간 미정';
+              return `${['일', '월', '화', '수', '목', '금', '토'][Number(entry.weekday)]} ${entry.day_part} ${time}`;
+            }).join(' · ')
+            : (start || end ? `${start} ~ ${end}` : '-');
           const quarter = String(r[CLASSES_HEADERS.QUARTER] ?? "").trim();
           const workers = String(r[CLASSES_HEADERS.WORKERS] ?? "-").trim();
 
@@ -413,7 +420,7 @@ export default function ClassScreen() {
                 <Text style={styles.day}>{header}</Text>
                 {(school || quarter) && <Text style={styles.meta}>{quarter}</Text>}
                 <View style={styles.lineRow}><Text style={styles.lineLabel}>장소</Text><Text style={styles.lineValue}>{place || "-"}</Text></View>
-                <View style={styles.lineRow}><Text style={styles.lineLabel}>시간</Text><Text style={styles.lineValue}>{start || end ? `${start} ~ ${end}` : "-"}</Text></View>
+                <View style={styles.lineRow}><Text style={styles.lineLabel}>시간</Text><Text style={styles.lineValue}>{timeLabel}</Text></View>
                 <View style={styles.lineRow}><Text style={styles.lineLabel}>근무자</Text><Text style={styles.lineValue}>{workers}</Text>
                 </View>
               </View>

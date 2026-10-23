@@ -305,7 +305,7 @@ export default function SupabaseAssistantScreen() {
         <ScrollView keyboardShouldPersistTaps="handled">
           <Field label="날짜" value={workDraft.date} placeholder="YYYY-MM-DD" onChange={(date) => setWorkDraft({ ...workDraft, date })} />
           <Field label="수업 / 근무명" value={workDraft.workLabel} onChange={(workLabel) => setWorkDraft({ ...workDraft, workLabel })} />
-          <View style={styles.row}><View style={{ flex: 1 }}><Field label="출근" value={workDraft.startTime} placeholder="HH:MM" onChange={(startTime) => setWorkDraft({ ...workDraft, startTime })} /></View><View style={{ flex: 1 }}><Field label="퇴근" value={workDraft.endTime} placeholder="HH:MM" onChange={(endTime) => setWorkDraft({ ...workDraft, endTime })} /></View></View>
+          <View style={styles.row}><View style={{ flex: 1 }}><Field label="출근" value={workDraft.startTime} placeholder="HH:MM" onChange={(startTime) => setWorkDraft({ ...workDraft, startTime })} /></View><View style={{ flex: 1 }}><Field label="퇴근 (비우면 근무 중)" value={workDraft.endTime} placeholder="HH:MM 또는 빈칸" onChange={(endTime) => setWorkDraft({ ...workDraft, endTime })} /></View></View>
           <Field label="당시 시급(원, 선택)" value={workDraft.hourlyRateKrw} keyboardType="numeric" onChange={(hourlyRateKrw) => setWorkDraft({ ...workDraft, hourlyRateKrw })} />
           <Field label="비고" value={workDraft.notes} onChange={(notes) => setWorkDraft({ ...workDraft, notes })} />
         </ScrollView>

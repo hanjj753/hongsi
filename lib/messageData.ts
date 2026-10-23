@@ -68,7 +68,8 @@ export async function resetSendingDevice(id: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function queueClassMessages(classId: string, sessionId: string | null, items: MessageDraft[]): Promise<number> {
+export async function queueClassMessages(classId: string, sessionId: string | null, items: MessageDraft[],
+  onProgress?: (processed: number, total: number, created: number) => void): Promise<number> {
   if (!items.length) throw new Error('메시지 대상이 없습니다.');
   let created = 0;
   for (let index = 0; index < items.length; index += 100) {
@@ -77,6 +78,7 @@ export async function queueClassMessages(classId: string, sessionId: string | nu
     });
     if (error) throw error;
     created += Number(data?.created ?? 0);
+    onProgress?.(Math.min(index + 100, items.length), items.length, created);
   }
   return created;
 }

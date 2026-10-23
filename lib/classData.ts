@@ -8,6 +8,8 @@ export type HomeworkGrade = 'A' | 'B' | 'C' | '미제출';
 export type MessageRecipientPreference = 'parent' | 'both';
 export type EnrollmentStatus = 'active' | 'transferred' | 'withdrawn';
 export type ClassDayPart = '' | '오전' | '오후' | '저녁';
+export type ClassKind = 'regular' | 'clinic';
+export type WeekdaySchedule = { weekday: number; dayPart: ClassDayPart; startTime: string; endTime: string };
 
 export type ClassStudent = {
   id: string;
@@ -22,7 +24,7 @@ export type ClassStudent = {
   enrollmentStatus: EnrollmentStatus;
   transferredToClassId: string;
   transferredToClassName: string;
-  participationType: 'enrolled' | 'makeup';
+  participationType: 'enrolled' | 'makeup' | 'clinic';
   homeClassId: string;
   homeClassName: string;
   homeSessionId: string;
@@ -105,6 +107,7 @@ export type SessionWorkspace = {
   sessionId: string;
   sessionNumber: number;
   sessionDate: string;
+  classKind: ClassKind;
   students: ClassStudent[];
   attendance: Record<string, SessionAttendance>;
   homeworks: SessionHomework[];
@@ -123,6 +126,28 @@ const workerNames = (links: any[] | null | undefined) => (links ?? [])
   .filter(Boolean)
   .join(', ');
 
+async function readAllRows(fetchPage: (from: number, to: number) => any): Promise<AnyRow[]> {
+  const rows: AnyRow[] = [];
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await fetchPage(offset, offset + pageSize - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) return rows;
+  }
+}
+
+async function readRowsByIds(table: 'session_homeworks' | 'session_tests' | 'class_sessions' | 'classes',
+  columns: string, ids: string[]): Promise<AnyRow[]> {
+  const rows: AnyRow[] = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const { data, error } = await getSupabase().from(table).select(columns).in('id', ids.slice(offset, offset + 100));
+    if (error) throw error;
+    rows.push(...(data ?? []));
+  }
+  return rows;
+}
+
 export function formatClassLabel(item: {
   id?: string | number;
   school?: string | null;
@@ -130,10 +155,21 @@ export function formatClassLabel(item: {
   weekdays?: number[] | null;
   dayPart?: string | null;
   day_part?: string | null;
+  classKind?: ClassKind;
+  class_kind?: ClassKind;
+  weekdaySchedule?: WeekdaySchedule[];
+  class_weekday_times?: Array<{ weekday: number; day_part: string }>;
 }): string {
-  const name = [item.school, item.subject].filter(Boolean).join(' ') || `수업 ${item.id ?? ''}`.trim();
-  const days = (item.weekdays ?? []).map((day) => weekdayLabels[day]).filter(Boolean).join('·');
-  return [name, days, item.dayPart ?? item.day_part].filter(Boolean).join(' ');
+  const name = item.classKind === 'clinic' || item.class_kind === 'clinic'
+    ? '클리닉' : [item.school, item.subject].filter(Boolean).join(' ') || `수업 ${item.id ?? ''}`.trim();
+  const schedule = item.weekdaySchedule ?? item.class_weekday_times?.map((entry) => ({
+    weekday: entry.weekday, dayPart: entry.day_part as ClassDayPart, startTime: '', endTime: '',
+  }));
+  const days = schedule?.length
+    ? [...schedule].sort((a, b) => a.weekday - b.weekday)
+      .map((entry) => `${weekdayLabels[entry.weekday]} ${entry.dayPart}`.trim()).join('·')
+    : (item.weekdays ?? []).map((day) => weekdayLabels[day]).filter(Boolean).join('·');
+  return [name, days, schedule?.length ? '' : item.dayPart ?? item.day_part].filter(Boolean).join(' ');
 }
 
 function toClassRow(item: AnyRow): AnyRow {
@@ -152,6 +188,8 @@ function toClassRow(item: AnyRow): AnyRow {
     __dbId: String(item.id),
     __classLabel: formatClassLabel(item),
     __dayPart: item.day_part ?? '',
+    __classKind: item.class_kind ?? 'regular',
+    __weekdaySchedule: item.class_weekday_times ?? [],
     __staffIds: (item.class_staff ?? []).map((link: AnyRow) => String(firstRelation<AnyRow>(link?.staff)?.id ?? '')).filter(Boolean),
   };
 }
@@ -159,7 +197,7 @@ function toClassRow(item: AnyRow): AnyRow {
 export async function getSupabaseClasses(): Promise<AnyRow[]> {
   const { data, error } = await getSupabase()
     .from('classes')
-    .select('id,term_label,school,subject,weekdays,day_part,default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))')
+    .select('id,term_label,school,subject,weekdays,day_part,class_kind,class_weekday_times(weekday,day_part,start_time,end_time),default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))')
     .eq('is_active', true)
     .order('term_label', { ascending: false })
     .order('id', { ascending: true });
@@ -191,6 +229,8 @@ export type ManagedClass = {
   locationId: string;
   locationName: string;
   weekdays: number[];
+  classKind: ClassKind;
+  weekdaySchedule: WeekdaySchedule[];
   dayPart: ClassDayPart;
   startTime: string;
   endTime: string;
@@ -209,7 +249,7 @@ export async function getSupabaseClassCatalog(): Promise<{
   const [termsResult, classesResult, locationsResult] = await Promise.all([
     getSupabase().from('class_terms').select('label,is_active').order('label', { ascending: false }),
     getSupabase().from('classes')
-      .select('id,term_label,school,subject,location_id,weekdays,day_part,default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(name),class_staff(staff_id)')
+      .select('id,term_label,school,subject,location_id,weekdays,day_part,class_kind,class_weekday_times(weekday,day_part,start_time,end_time),default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(name),class_staff(staff_id)')
       .order('term_label', { ascending: false }).order('id', { ascending: true }),
     getSupabase().from('locations').select('id,name').order('name', { ascending: true }),
   ]);
@@ -225,6 +265,11 @@ export async function getSupabaseClassCatalog(): Promise<{
       locationId: String(item.location_id ?? ''),
       locationName: String(firstRelation<AnyRow>(item.location)?.name ?? ''),
       weekdays: Array.isArray(item.weekdays) ? item.weekdays.map(Number) : [],
+      classKind: item.class_kind === 'clinic' ? 'clinic' : 'regular',
+      weekdaySchedule: (item.class_weekday_times ?? []).map((entry: AnyRow) => ({
+        weekday: Number(entry.weekday), dayPart: entry.day_part as ClassDayPart,
+        startTime: timeHm(entry.start_time), endTime: timeHm(entry.end_time),
+      })),
       dayPart: (item.day_part ?? '') as ClassDayPart,
       startTime: timeHm(item.default_start_time),
       endTime: timeHm(item.default_end_time),
@@ -262,33 +307,38 @@ export async function saveSupabaseManagedClass(input: ManagedClassInput): Promis
   const school = input.school.trim();
   const subject = input.subject.trim();
   if (!input.termLabel.trim()) throw new Error('분기를 선택해 주세요.');
-  if (!school && !subject) throw new Error('학교 또는 과목을 입력해 주세요.');
-  if (!validTimeOrBlank(input.startTime) || !validTimeOrBlank(input.endTime)) {
-    throw new Error('시간은 HH:MM 형식으로 입력해 주세요.');
+  if (input.classKind === 'regular' && !school && !subject) throw new Error('학교 또는 과목을 입력해 주세요.');
+  const schedule = [...input.weekdaySchedule].sort((a, b) => a.weekday - b.weekday);
+  if (!schedule.length || schedule.length > 7 || new Set(schedule.map((item) => item.weekday)).size !== schedule.length) {
+    throw new Error('요일을 1개 이상 중복 없이 선택해 주세요.');
   }
-  if (Boolean(input.startTime) !== Boolean(input.endTime)) {
-    throw new Error('시작 시간과 종료 시간을 함께 입력해 주세요.');
+  for (const item of schedule) {
+    if (!Number.isInteger(item.weekday) || item.weekday < 0 || item.weekday > 6) throw new Error('요일 값이 올바르지 않습니다.');
+    if (!['오전', '오후', '저녁'].includes(item.dayPart)) throw new Error('각 요일의 시간대를 선택해 주세요.');
+    if (!validTimeOrBlank(item.startTime) || !validTimeOrBlank(item.endTime)
+      || Boolean(item.startTime) !== Boolean(item.endTime)
+      || (item.startTime && item.endTime && item.startTime >= item.endTime)) {
+      throw new Error('각 요일의 시작·종료 시간을 HH:MM 형식으로 입력해 주세요.');
+    }
   }
   const rate = input.hourlyRateKrw.trim();
   if (rate && (!/^\d+$/.test(rate) || Number(rate) > 2147483647)) {
     throw new Error('시급은 0 이상의 정수로 입력해 주세요.');
   }
-  const weekdays = [...new Set(input.weekdays)].sort((a, b) => a - b);
-  if (weekdays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new Error('요일 값이 올바르지 않습니다.');
-  if (!['오전', '오후', '저녁'].includes(input.dayPart)) throw new Error('수업 시간대를 선택해 주세요.');
-  const { data, error } = await getSupabase().rpc('save_managed_class_with_day_part', {
+  const { data, error } = await getSupabase().rpc('save_managed_class_v2', {
     target_class_id: input.id && positiveId(input.id) ? input.id : null,
     target_term_label: input.termLabel.trim(),
-    target_school: school,
-    target_subject: subject,
+    target_kind: input.classKind,
+    target_school: input.classKind === 'clinic' ? null : school,
+    target_subject: input.classKind === 'clinic' ? null : subject,
     target_location_id: input.locationId && positiveId(input.locationId) ? input.locationId : null,
-    target_weekdays: weekdays,
-    target_start_time: input.startTime || null,
-    target_end_time: input.endTime || null,
+    target_weekday_schedule: schedule.map((item) => ({
+      weekday: item.weekday, day_part: item.dayPart,
+      start_time: item.startTime || null, end_time: item.endTime || null,
+    })),
     target_hourly_rate_krw: rate ? Number(rate) : null,
     target_is_active: input.isActive,
     target_staff_ids: [...new Set(input.staffIds)].filter(positiveId).map(Number),
-    target_day_part: input.dayPart,
   });
   if (error) throw error;
   return String(data);
@@ -308,14 +358,13 @@ export async function deleteSupabaseManagedClass(classId: string): Promise<void>
 
 export async function addSupabaseClassSessions(
   classId: string,
-  sessions: Array<{ sessionNumber: number; sessionDate: string; notes: string; staffIds?: string[] }>,
+  sessions: Array<{ sessionDate: string; notes: string; staffIds?: string[] }>,
 ): Promise<number> {
   if (!positiveId(classId)) throw new Error('수업 ID가 올바르지 않습니다.');
   if (sessions.length < 1 || sessions.length > 60) throw new Error('일정은 한 번에 1~60개까지 등록할 수 있습니다.');
   const { data, error } = await getSupabase().rpc('create_class_sessions', {
     target_class_id: classId,
     session_drafts: sessions.map((item) => ({
-      session_number: item.sessionNumber,
       session_date: item.sessionDate,
       notes: item.notes.trim(),
       ...(item.staffIds ? { staff_ids: item.staffIds } : {}),
@@ -380,7 +429,7 @@ export async function getSupabaseClassDetail(classId: string): Promise<{ row: An
 
   const { data: classItem, error: classError } = await getSupabase()
     .from('classes')
-    .select('id,term_label,school,subject,weekdays,day_part,default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))')
+    .select('id,term_label,school,subject,weekdays,day_part,class_kind,class_weekday_times(weekday,day_part,start_time,end_time),default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))')
     .eq('id', normalizedClassId)
     .eq('is_active', true)
     .maybeSingle();
@@ -430,7 +479,8 @@ function toClassStudent(enrollment: AnyRow): ClassStudent | null {
       ? enrollment.enrollment_status as EnrollmentStatus : 'active',
     transferredToClassId: String(enrollment.transferred_to_class_id ?? transferTarget?.id ?? ''),
     transferredToClassName: transferTarget ? formatClassLabel(transferTarget) : '',
-    participationType: enrollment.participation_type === 'makeup' ? 'makeup' : 'enrolled',
+    participationType: enrollment.participation_type === 'clinic' ? 'clinic'
+      : enrollment.participation_type === 'makeup' ? 'makeup' : 'enrolled',
     homeClassId: String(enrollment.home_class_id ?? ''),
     homeClassName: String(enrollment.home_class_name ?? ''),
     homeSessionId: String(enrollment.home_session_id ?? ''),
@@ -443,7 +493,7 @@ export async function getSupabaseClassStudents(classId: string): Promise<ClassSt
   if (!positiveId(normalizedClassId)) throw new Error('수업 ID가 올바르지 않습니다.');
   const { data, error } = await getSupabase()
     .from('enrollments')
-    .select('joined_on,ended_on,enrollment_status,transferred_to_class_id,transferred_to:classes!enrollments_transferred_to_class_id_fkey(id,school,subject,weekdays,day_part),student:students(id,student_code,full_name,student_phone,parent_phone,email,default_message_recipients)')
+    .select('joined_on,ended_on,enrollment_status,transferred_to_class_id,transferred_to:classes!enrollments_transferred_to_class_id_fkey(id,school,subject,weekdays,day_part,class_kind),student:students(id,student_code,full_name,student_phone,parent_phone,email,default_message_recipients)')
     .eq('class_id', normalizedClassId);
   if (error) throw error;
   return (data ?? [])
@@ -555,8 +605,8 @@ export async function getSupabaseTransferTargets(sourceClassId: string): Promise
     .select('term_label').eq('id', sourceClassId).single();
   if (sourceError) throw sourceError;
   const { data, error } = await getSupabase().from('classes')
-    .select('id,school,subject,weekdays,day_part').eq('term_label', source.term_label).eq('is_active', true)
-    .neq('id', sourceClassId).order('id', { ascending: true });
+    .select('id,school,subject,weekdays,day_part,class_kind').eq('term_label', source.term_label).eq('is_active', true)
+    .neq('id', sourceClassId).eq('class_kind', 'regular').order('id', { ascending: true });
   if (error) throw error;
   return (data ?? []).map((item: AnyRow) => ({
     id: String(item.id),
@@ -633,7 +683,7 @@ export async function getSupabaseMakeupCandidates(classId: string, sessionId: st
   const linkedOriginalSessions = new Set((linkedHomeSessionsResult.data ?? [])
     .map((item: AnyRow) => `${item.student_id}:${item.home_session_id}`));
   const { data, error } = await getSupabase().from('enrollments')
-    .select('class_id,student_id,joined_on,ended_on,enrollment_status,class:classes!enrollments_class_id_fkey(id,term_label,school,subject,weekdays,day_part,is_active,class_sessions(id,session_number,session_date)),student:students(id,student_code,full_name)')
+    .select('class_id,student_id,joined_on,ended_on,enrollment_status,class:classes!enrollments_class_id_fkey(id,term_label,school,subject,weekdays,day_part,class_kind,is_active,class_sessions(id,session_number,session_date)),student:students(id,student_code,full_name)')
     .neq('class_id', classId);
   if (error) throw error;
   return (data ?? []).filter((item: AnyRow) => {
@@ -654,6 +704,56 @@ export async function getSupabaseMakeupCandidates(classId: string, sessionId: st
       homeClassName: formatClassLabel(sourceClass),
     };
   }).sort((a, b) => koreanNameCollator.compare(a.fullName, b.fullName) || a.homeClassName.localeCompare(b.homeClassName));
+}
+
+export async function getSupabaseClinicCandidates(classId: string, sessionId: string): Promise<MakeupCandidate[]> {
+  if (![classId, sessionId].every(positiveId)) throw new Error('클리닉 또는 차시 ID가 올바르지 않습니다.');
+  const [hostResult, sessionResult, participantsResult] = await Promise.all([
+    getSupabase().from('classes').select('term_label,class_kind').eq('id', classId).single(),
+    getSupabase().from('class_sessions').select('session_date').eq('id', sessionId).eq('class_id', classId).single(),
+    getSupabase().from('session_participants').select('student_id').eq('session_id', sessionId),
+  ]);
+  const firstError = hostResult.error || sessionResult.error || participantsResult.error;
+  if (firstError) throw firstError;
+  if (hostResult.data.class_kind !== 'clinic') throw new Error('클리닉 수업이 아닙니다.');
+  const sessionDate = String(sessionResult.data.session_date);
+  const alreadyAdded = new Set((participantsResult.data ?? []).map((item: AnyRow) => String(item.student_id)));
+  const { data, error } = await getSupabase().from('enrollments')
+    .select('class_id,student_id,joined_on,ended_on,class:classes!enrollments_class_id_fkey!inner(id,term_label,school,subject,weekdays,day_part,class_kind,is_active),student:students(id,student_code,full_name)')
+    .eq('class.term_label', hostResult.data.term_label)
+    .eq('class.class_kind', 'regular')
+    .eq('class.is_active', true);
+  if (error) throw error;
+  const seen = new Set<string>();
+  return (data ?? []).filter((item: AnyRow) => {
+    const home = firstRelation<AnyRow>(item.class);
+    const id = String(item.student_id);
+    if (!home?.is_active || home.class_kind !== 'regular' || home.term_label !== hostResult.data.term_label
+      || (item.joined_on && item.joined_on > sessionDate)
+      || (item.ended_on && item.ended_on < sessionDate)
+      || alreadyAdded.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  }).map((item: AnyRow) => {
+    const home = firstRelation<AnyRow>(item.class)!;
+    const student = firstRelation<AnyRow>(item.student)!;
+    return {
+      studentId: String(student.id), studentCode: String(student.student_code),
+      fullName: String(student.full_name), homeClassId: String(home.id),
+      homeClassName: formatClassLabel(home),
+    };
+  }).sort((a, b) => koreanNameCollator.compare(a.fullName, b.fullName));
+}
+
+export async function addSupabaseClinicParticipant(
+  classId: string, sessionId: string, candidate: MakeupCandidate, notes = '',
+): Promise<void> {
+  const { error } = await getSupabase().rpc('add_clinic_participant', {
+    target_host_class_id: classId, target_session_id: sessionId,
+    target_student_id: candidate.studentId, target_home_class_id: candidate.homeClassId,
+    new_notes: notes,
+  });
+  if (error) throw error;
 }
 
 export async function getSupabaseMakeupHomeSessions(homeClassId: string, studentId: string): Promise<MakeupHomeSession[]> {
@@ -712,7 +812,7 @@ export async function getSupabaseSessionWorkspace(classId: string, sessionId: st
   if (!positiveId(classId) || !positiveId(sessionId)) throw new Error('수업 또는 차시 ID가 올바르지 않습니다.');
   const { data: session, error: sessionError } = await getSupabase()
     .from('class_sessions')
-    .select('id,session_number,session_date')
+    .select('id,session_number,session_date,class:classes(class_kind)')
     .eq('id', sessionId)
     .eq('class_id', classId)
     .single();
@@ -723,7 +823,7 @@ export async function getSupabaseSessionWorkspace(classId: string, sessionId: st
       .select('joined_on,ended_on,enrollment_status,student:students(id,student_code,full_name,student_phone,parent_phone,email,default_message_recipients)')
       .eq('class_id', classId),
     getSupabase().from('session_participants')
-      .select('student_id,home_class_id,home_session_id,notes,student:students(id,student_code,full_name,student_phone,parent_phone,email,default_message_recipients)')
+      .select('student_id,home_class_id,home_session_id,participation_type,notes,student:students(id,student_code,full_name,student_phone,parent_phone,email,default_message_recipients)')
       .eq('host_class_id', classId).eq('session_id', sessionId),
     getSupabase().from('student_session_records')
       .select('student_id,attendance_status,makeup_date,makeup_time,makeup_note,makeup_host_session_id,notes')
@@ -765,7 +865,7 @@ export async function getSupabaseSessionWorkspace(classId: string, sessionId: st
   const relatedClasses = new Map<string, AnyRow>();
   if (relatedClassIds.length > 0) {
     const { data: classRows, error: classRowsError } = await getSupabase().from('classes')
-      .select('id,school,subject,weekdays,day_part').in('id', relatedClassIds);
+      .select('id,school,subject,weekdays,day_part,class_kind').in('id', relatedClassIds);
     if (classRowsError) throw classRowsError;
     for (const classRow of classRows ?? []) relatedClasses.set(String(classRow.id), classRow);
   }
@@ -777,7 +877,7 @@ export async function getSupabaseSessionWorkspace(classId: string, sessionId: st
     return toClassStudent({
       student: item.student,
       enrollment_status: 'active',
-      participation_type: 'makeup',
+      participation_type: item.participation_type,
       home_class_id: item.home_class_id,
       home_class_name: homeClass ? formatClassLabel(homeClass) : '',
       home_session_id: item.home_session_id,
@@ -818,27 +918,32 @@ export async function getSupabaseSessionWorkspace(classId: string, sessionId: st
       status: result.status === '결시' ? '결시' : '', notes: String(result.notes ?? ''),
     }])),
   }));
-  return { sessionId: String(session.id), sessionNumber: Number(session.session_number), sessionDate, students, attendance, homeworks, tests };
+  return { sessionId: String(session.id), sessionNumber: Number(session.session_number), sessionDate,
+    classKind: firstRelation<AnyRow>((session as AnyRow).class)?.class_kind === 'clinic' ? 'clinic' : 'regular',
+    students, attendance, homeworks, tests };
 }
 
 export async function getSupabaseAllStudentOverviews(): Promise<StudentOverview[]> {
-  const [studentsResult, enrollmentsResult, classesResult] = await Promise.all([
-    getSupabase().from('students').select('id,student_code,full_name').order('full_name', { ascending: true }),
-    getSupabase().from('enrollments').select('class_id,student_id,joined_on,ended_on,enrollment_status,transferred_to_class_id'),
-    getSupabase().from('classes').select('id,term_label,school,subject,weekdays,day_part,is_active'),
+  const [students, enrollments, classRows] = await Promise.all([
+    readAllRows((from, to) => getSupabase().from('students')
+      .select('id,student_code,full_name').order('full_name').order('id').range(from, to)),
+    readAllRows((from, to) => getSupabase().from('enrollments')
+      .select('class_id,student_id,joined_on,ended_on,enrollment_status,transferred_to_class_id')
+      .order('student_id').order('class_id').range(from, to)),
+    readAllRows((from, to) => getSupabase().from('classes')
+      .select('id,term_label,school,subject,weekdays,day_part,class_kind,is_active')
+      .order('id').range(from, to)),
   ]);
-  const firstError = studentsResult.error || enrollmentsResult.error || classesResult.error;
-  if (firstError) throw firstError;
-  const classes = new Map((classesResult.data ?? [])
+  const classes = new Map((classRows)
     .filter((item: AnyRow) => item.is_active)
     .map((item: AnyRow) => [String(item.id), item]));
   const enrollmentsByStudent = new Map<string, AnyRow[]>();
-  for (const item of enrollmentsResult.data ?? []) {
+  for (const item of enrollments) {
     if (!classes.has(String(item.class_id))) continue;
     const key = String(item.student_id);
     enrollmentsByStudent.set(key, [...(enrollmentsByStudent.get(key) ?? []), item]);
   }
-  return (studentsResult.data ?? []).map((student: AnyRow) => ({
+  return (students).map((student: AnyRow) => ({
     id: String(student.id),
     studentCode: String(student.student_code),
     fullName: String(student.full_name),
@@ -861,49 +966,50 @@ export async function getSupabaseAllStudentOverviews(): Promise<StudentOverview[
 
 export async function getSupabaseStudentRecordHistory(studentId: string): Promise<StudentRecordHistory> {
   if (!positiveId(studentId)) throw new Error('학생 ID가 올바르지 않습니다.');
-  const [recordsResult, homeworkResults, testResults, participantsResult] = await Promise.all([
-    getSupabase().from('student_session_records')
-      .select('session_id,class_id,attendance_status,makeup_host_session_id').eq('student_id', studentId),
-    getSupabase().from('student_homework_results').select('homework_id,class_id,grade').eq('student_id', studentId),
-    getSupabase().from('student_test_results').select('test_id,class_id,score,result_text,status').eq('student_id', studentId),
-    getSupabase().from('session_participants')
-      .select('session_id,host_class_id,home_session_id,home_class_id').eq('student_id', studentId),
+  const [records, homeworkResults, testResults, participants] = await Promise.all([
+    readAllRows((from, to) => getSupabase().from('student_session_records')
+      .select('session_id,class_id,attendance_status,makeup_host_session_id').eq('student_id', studentId)
+      .order('session_id').range(from, to)),
+    readAllRows((from, to) => getSupabase().from('student_homework_results')
+      .select('homework_id,class_id,grade').eq('student_id', studentId)
+      .order('homework_id').range(from, to)),
+    readAllRows((from, to) => getSupabase().from('student_test_results')
+      .select('test_id,class_id,score,result_text,status').eq('student_id', studentId)
+      .order('test_id').range(from, to)),
+    readAllRows((from, to) => getSupabase().from('session_participants')
+      .select('session_id,host_class_id,home_session_id,home_class_id,participation_type').eq('student_id', studentId)
+      .order('session_id').range(from, to)),
   ]);
-  const firstError = recordsResult.error || homeworkResults.error || testResults.error || participantsResult.error;
-  if (firstError) throw firstError;
-  const records = recordsResult.data ?? [];
-  const homeworkIds = (homeworkResults.data ?? []).map((item: AnyRow) => String(item.homework_id));
-  const testIds = (testResults.data ?? []).map((item: AnyRow) => String(item.test_id));
-  const [homeworkItemsResult, testItemsResult] = await Promise.all([
-    homeworkIds.length ? getSupabase().from('session_homeworks').select('id,session_id,title').in('id', homeworkIds) : Promise.resolve({ data: [], error: null }),
-    testIds.length ? getSupabase().from('session_tests').select('id,session_id,title,result_type').in('id', testIds) : Promise.resolve({ data: [], error: null }),
+  const homeworkIds = (homeworkResults).map((item: AnyRow) => String(item.homework_id));
+  const testIds = (testResults).map((item: AnyRow) => String(item.test_id));
+  const [homeworkItemRows, testItemRows] = await Promise.all([
+    readRowsByIds('session_homeworks', 'id,session_id,title', homeworkIds),
+    readRowsByIds('session_tests', 'id,session_id,title,result_type', testIds),
   ]);
-  if (homeworkItemsResult.error || testItemsResult.error) throw homeworkItemsResult.error || testItemsResult.error;
-  const homeworkItems = new Map((homeworkItemsResult.data ?? []).map((item: AnyRow) => [String(item.id), item]));
-  const testItems = new Map((testItemsResult.data ?? []).map((item: AnyRow) => [String(item.id), item]));
+  const homeworkItems = new Map(homeworkItemRows.map((item: AnyRow) => [String(item.id), item]));
+  const testItems = new Map(testItemRows.map((item: AnyRow) => [String(item.id), item]));
   const sessionIds = [...new Set([
     ...records.map((item: AnyRow) => String(item.session_id)),
     ...records.map((item: AnyRow) => String(item.makeup_host_session_id ?? '')).filter(Boolean),
-    ...(homeworkItemsResult.data ?? []).map((item: AnyRow) => String(item.session_id)),
-    ...(testItemsResult.data ?? []).map((item: AnyRow) => String(item.session_id)),
-    ...(participantsResult.data ?? []).flatMap((item: AnyRow) => [String(item.session_id), String(item.home_session_id ?? '')]).filter(Boolean),
+    ...homeworkItemRows.map((item: AnyRow) => String(item.session_id)),
+    ...testItemRows.map((item: AnyRow) => String(item.session_id)),
+    ...(participants).flatMap((item: AnyRow) => [String(item.session_id), String(item.home_session_id ?? '')]).filter(Boolean),
   ])];
   const classIds = [...new Set([
     ...records.map((item: AnyRow) => String(item.class_id)),
-    ...(homeworkResults.data ?? []).map((item: AnyRow) => String(item.class_id)),
-    ...(testResults.data ?? []).map((item: AnyRow) => String(item.class_id)),
-    ...(participantsResult.data ?? []).flatMap((item: AnyRow) => [String(item.host_class_id), String(item.home_class_id)]),
+    ...(homeworkResults).map((item: AnyRow) => String(item.class_id)),
+    ...(testResults).map((item: AnyRow) => String(item.class_id)),
+    ...(participants).flatMap((item: AnyRow) => [String(item.host_class_id), String(item.home_class_id)]),
   ])];
   if (sessionIds.length === 0) return { attendance: [], homeworks: [], tests: [] };
-  const [sessionsResult, classesResult] = await Promise.all([
-    getSupabase().from('class_sessions').select('id,class_id,session_number,session_date').in('id', sessionIds),
-    getSupabase().from('classes').select('id,term_label,school,subject,weekdays,day_part,is_active').in('id', classIds),
+  const [sessionRows, classRows] = await Promise.all([
+    readRowsByIds('class_sessions', 'id,class_id,session_number,session_date', sessionIds),
+    readRowsByIds('classes', 'id,term_label,school,subject,weekdays,day_part,class_kind,is_active', classIds),
   ]);
-  if (sessionsResult.error || classesResult.error) throw sessionsResult.error || classesResult.error;
-  const sessions = new Map((sessionsResult.data ?? []).map((item: AnyRow) => [String(item.id), item]));
-  const classes = new Map((classesResult.data ?? []).map((item: AnyRow) => [String(item.id), item]));
+  const sessions = new Map(sessionRows.map((item: AnyRow) => [String(item.id), item]));
+  const classes = new Map(classRows.map((item: AnyRow) => [String(item.id), item]));
   const isActiveClass = (classId: unknown) => Boolean(classes.get(String(classId))?.is_active);
-  const visibleParticipants = (participantsResult.data ?? []).filter((item: AnyRow) => (
+  const visibleParticipants = (participants).filter((item: AnyRow) => (
     isActiveClass(item.host_class_id) && isActiveClass(item.home_class_id)
   ));
   const participantByHostSession = new Map(visibleParticipants
@@ -922,7 +1028,9 @@ export async function getSupabaseStudentRecordHistory(studentId: string): Promis
       const original = sessions.get(String(hostRelation.home_session_id));
       return {
         isMakeupVisit: true,
-        makeupRelationLabel: `${className(hostRelation.home_class_id)}${original ? ` ${original.session_number}차시` : ''} 보강으로 임시 참여`,
+        makeupRelationLabel: hostRelation.participation_type === 'clinic'
+          ? `클리닉 참여 · 소속 수업 ${className(hostRelation.home_class_id)}`
+          : `${className(hostRelation.home_class_id)}${original ? ` ${original.session_number}차시` : ''} 보강으로 임시 참여`,
       };
     }
     const homeRelation = participantByHomeSession.get(key);
@@ -952,12 +1060,12 @@ export async function getSupabaseStudentRecordHistory(studentId: string): Promis
       status: (item.attendance_status ?? '') as AttendanceStatus | '',
     };
   });
-  const homeworks = (homeworkResults.data ?? []).filter((item: AnyRow) => isActiveClass(item.class_id))
+  const homeworks = (homeworkResults).filter((item: AnyRow) => isActiveClass(item.class_id))
     .map((item: AnyRow): StudentHomeworkHistory => {
     const definition = homeworkItems.get(String(item.homework_id));
     return { ...base(definition?.session_id, item.class_id), title: String(definition?.title ?? ''), grade: item.grade as HomeworkGrade };
   });
-  const tests = (testResults.data ?? []).filter((item: AnyRow) => isActiveClass(item.class_id))
+  const tests = (testResults).filter((item: AnyRow) => isActiveClass(item.class_id))
     .map((item: AnyRow): StudentTestHistory => {
     const definition = testItems.get(String(item.test_id));
     return {

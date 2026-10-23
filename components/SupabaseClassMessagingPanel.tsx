@@ -36,7 +36,7 @@ function describeTests(workspace: SessionWorkspace, studentId: string): string {
 }
 
 function makeCandidates(workspace: SessionWorkspace): Candidate[] {
-  return workspace.students.filter((student) => student.participationType === 'enrolled')
+  return workspace.students.filter((student) => student.participationType !== 'makeup')
     .map((student) => ({
       student, attendance: workspace.attendance[student.id]?.status || '-',
       homework: workspace.homeworks.map((item) => `${item.title}: ${item.results[student.id]?.grade || '미입력'}`).join(', ') || '-',
@@ -86,6 +86,7 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
   const [deviceState, setDeviceState] = useState<'unregistered' | 'pending' | 'enabled' | 'invalid'>('unregistered');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const prepared = useRef<{ fingerprint: string; items: MessageDraft[] } | null>(null);
@@ -138,7 +139,9 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
         student_id: item.studentId, content: item.content, request_id: Crypto.randomUUID(),
       })) };
     }
-    const created = await queueClassMessages(classId, targetSessionId, prepared.current.items);
+    setProgress({ label: '메시지를 대기 목록에 추가하는 중', done: 0, total: prepared.current.items.length });
+    const created = await queueClassMessages(classId, targetSessionId, prepared.current.items,
+      (done, total) => setProgress({ label: '메시지를 대기 목록에 추가하는 중', done, total }));
     prepared.current = null;
     await load();
     return created;
@@ -154,7 +157,7 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
       setSuccess(`${count}명의 공지 메시지를 대기 목록에 추가했습니다.`);
       setNotice('');
     } catch (cause: any) { setError(cause?.message || '공지 메시지를 추가하지 못했습니다.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgress(null); }
   }
 
   async function loadCandidates() {
@@ -181,7 +184,7 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
       setSuccess(`${count}명의 개별 메시지를 대기 목록에 추가했습니다.`);
       setCandidates([]);
     } catch (cause: any) { setError(cause?.message || '개별 메시지를 추가하지 못했습니다.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgress(null); }
   }
 
   async function sendPending() {
@@ -189,6 +192,8 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
     setBusy(true); setError(''); setSuccess('');
     let submitted = 0;
     let failed = 0;
+    const targetCount = Math.min(pendingCount, 200);
+    setProgress({ label: '문자 발송 준비 중', done: 0, total: targetCount });
     try {
       const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.SEND_SMS);
       if (permission !== PermissionsAndroid.RESULTS.GRANTED) throw new Error('Android 문자 발송 권한이 필요합니다.');
@@ -197,24 +202,27 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
       for (let index = 0; index < 200; index++) {
         const item = await claimNextMessageDelivery(classId, pairing);
         if (!item) break;
+        setProgress({ label: 'Android 기기에 문자를 제출하는 중', done: submitted + failed, total: targetCount });
         try {
           await DirectSms.sendDirectSms(item.phone.replace(/\D/g, ''), item.content);
         } catch (cause: any) {
           try { await finishMessageDelivery(item, pairing, 'failed', cause?.message || String(cause)); }
           catch { throw new Error('문자 발송 실패 후 DB 상태를 확인하지 못했습니다. 전송 중 기록을 확인해 주세요. 자동 재발송하지 않습니다.'); }
           failed++;
+          setProgress({ label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
           await new Promise((resolve) => setTimeout(resolve, 1500));
           continue;
         }
         try { await finishMessageDelivery(item, pairing, 'submitted'); }
         catch { throw new Error('기기에 문자를 제출했지만 DB 상태를 확인하지 못했습니다. 전송 중 기록을 확인해 주세요. 자동 재발송하지 않습니다.'); }
         submitted++;
+        setProgress({ label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
       setSuccess(`기기 제출 ${submitted}건 · 실패 ${failed}건. 실제 수신 여부는 통신사 결과를 확인해 주세요.`);
       await load();
     } catch (cause: any) { setError(cause?.message || '문자 발송을 완료하지 못했습니다.'); await load(); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgress(null); }
   }
 
   async function cancelPending() {
@@ -229,6 +237,12 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
     <Text style={styles.description}>학생별 기본 수신자에 따라 학부모만 또는 학생·학부모 모두에게 각각 발송 대기 기록을 만듭니다.</Text>
     {!!error && <Text style={styles.error}>{error}</Text>}
     {!!success && <Text style={styles.success}>{success}</Text>}
+    {progress && <View style={styles.progressCard} accessibilityLabel={`${progress.label} ${progress.done}/${progress.total}`}>
+      <Text style={styles.progressLabel}>{progress.label} · {progress.done}/{progress.total}건</Text>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${Math.min(100, Math.round(progress.done / Math.max(progress.total, 1) * 100))}%` }]} />
+      </View>
+    </View>}
     {loading ? <ActivityIndicator color="#4F46E5" /> : <>
       <View style={styles.section}>
         <Text style={styles.heading}>공지 메시지 추가</Text>
@@ -322,6 +336,10 @@ const styles = StyleSheet.create({
   preview: { backgroundColor: '#EEF2FF', padding: 12, borderRadius: 8, marginTop: 12 }, previewText: { color: '#374151', marginTop: 6, lineHeight: 20 },
   message: { padding: 12, borderBottomWidth: 1, borderColor: '#E5E7EB' }, empty: { color: '#6B7280', marginTop: 10 },
   deviceInput: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 10, backgroundColor: '#F9FAFB' },
+  progressCard: { marginTop: 12, padding: 11, borderRadius: 9, backgroundColor: '#EEF2FF' },
+  progressLabel: { color: '#312E81', fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  progressTrack: { height: 9, borderRadius: 9, overflow: 'hidden', backgroundColor: '#C7D2FE' },
+  progressFill: { height: '100%', backgroundColor: '#4F46E5' },
   error: { color: '#B91C1C', marginTop: 9 }, success: { color: '#047857', marginTop: 9 },
 });
 

@@ -16,13 +16,16 @@ import {
 } from 'react-native';
 
 import { AppAccessGate } from '../../components/AppAccessGate';
+import TestQuestionSheet from '../../components/TestQuestionSheet';
 import { useAppAccess } from '../../contexts/AppAccessContext';
 import {
   addSupabaseMakeupParticipant,
+  addSupabaseClinicParticipant,
   addSupabaseHomework,
   addSupabaseTest,
   deleteSupabaseSessionItem,
   getSupabaseMakeupCandidates,
+  getSupabaseClinicCandidates,
   getSupabaseMakeupHomeSessions,
   getSupabaseSessionWorkspace,
   removeSupabaseMakeupParticipant,
@@ -244,7 +247,15 @@ function SessionWorkspaceScreen() {
     };
   }, [drafts, workspace]);
 
+  const savedDrafts = useMemo(() => workspace ? buildDrafts(workspace) : {}, [workspace]);
+  const changedStudents = useMemo(() => workspace?.students.filter((student) =>
+    JSON.stringify(drafts[student.id]) !== JSON.stringify(savedDrafts[student.id])) ?? [],
+  [drafts, savedDrafts, workspace]);
+  const hasDraftChanges = changedStudents.length > 0;
+
   const updateDraft = useCallback((studentId: string, updater: (draft: StudentDraftState) => StudentDraftState) => {
+    setNotice('');
+    setActionError('');
     setDrafts((current) => {
       const draft = current[studentId];
       return draft ? { ...current, [studentId]: updater(draft) } : current;
@@ -329,12 +340,12 @@ function SessionWorkspaceScreen() {
   };
 
   const saveAll = async () => {
-    if (!workspace || workspace.students.length === 0) return;
+    if (!workspace || workspace.students.length === 0 || !hasDraftChanges || busyKey || refreshing) return;
     setActionError('');
     setNotice('');
     let payloads: Array<{ studentId: string; draft: StudentSessionDraft }>;
     try {
-      payloads = workspace.students.map((student) => {
+      payloads = changedStudents.map((student) => {
         const draft = buildStudentPayload(student.id, student.fullName);
         if (!draft) throw new Error(`${student.fullName} 학생의 입력값을 찾지 못했습니다.`);
         return { studentId: student.id, draft };
@@ -347,7 +358,7 @@ function SessionWorkspaceScreen() {
     try {
       await saveSupabaseSessionRosterDraft(classId, sessionId, payloads);
       await load(false);
-      setNotice(`${workspace.students.length}명의 기록을 한 번에 저장했습니다.`);
+      setNotice(`${payloads.length}명의 변경된 기록을 저장했습니다.`);
     } catch (error) {
       setActionError(errorText(error));
     } finally {
@@ -439,9 +450,12 @@ function SessionWorkspaceScreen() {
   const openMakeupModal = async () => {
     setBusyKey('load-makeup'); setActionError(''); setNotice('');
     try {
-      const candidates = await getSupabaseMakeupCandidates(classId, sessionId);
+      const clinic = workspace?.classKind === 'clinic';
+      const candidates = clinic
+        ? await getSupabaseClinicCandidates(classId, sessionId)
+        : await getSupabaseMakeupCandidates(classId, sessionId);
       const firstCandidate = candidates[0];
-      const originalSessions = firstCandidate
+      const originalSessions = !clinic && firstCandidate
         ? await getSupabaseMakeupHomeSessions(firstCandidate.homeClassId, firstCandidate.studentId)
         : [];
       setMakeupCandidates(candidates);
@@ -459,7 +473,7 @@ function SessionWorkspaceScreen() {
     setMakeupHomeSessions([]);
     setMakeupHomeSessionId('');
     const candidate = makeupCandidates.find((item) => `${item.studentId}:${item.homeClassId}` === candidateKey);
-    if (!candidate) return;
+    if (!candidate || workspace?.classKind === 'clinic') return;
     setMakeupSessionsLoading(true);
     try {
       const originalSessions = await getSupabaseMakeupHomeSessions(candidate.homeClassId, candidate.studentId);
@@ -474,26 +488,32 @@ function SessionWorkspaceScreen() {
 
   const addMakeupStudent = async () => {
     const candidate = makeupCandidates.find((item) => `${item.studentId}:${item.homeClassId}` === makeupCandidateKey);
-    if (!candidate) { setActionError('추가할 보강 학생을 선택해 주세요.'); return; }
-    if (!makeupHomeSessionId) { setActionError('원래 수업에서 보강으로 처리할 차시를 선택해 주세요.'); return; }
+    if (!candidate) { setActionError('추가할 학생을 선택해 주세요.'); return; }
+    if (workspace?.classKind !== 'clinic' && !makeupHomeSessionId) {
+      setActionError('원래 수업에서 보강으로 처리할 차시를 선택해 주세요.'); return;
+    }
     setBusyKey('add-makeup'); setActionError(''); setNotice('');
     try {
-      await addSupabaseMakeupParticipant(classId, sessionId, candidate, makeupHomeSessionId, makeupNotes);
+      if (workspace?.classKind === 'clinic') {
+        await addSupabaseClinicParticipant(classId, sessionId, candidate, makeupNotes);
+      } else {
+        await addSupabaseMakeupParticipant(classId, sessionId, candidate, makeupHomeSessionId, makeupNotes);
+      }
       setMakeupModalVisible(false);
       await load(false);
-      setNotice(`${candidate.fullName} 학생을 이 차시의 보강 참여자로 추가했습니다.`);
+      setNotice(`${candidate.fullName} 학생을 이 차시에 추가했습니다.`);
     } catch (error) { setActionError(errorText(error)); }
     finally { setBusyKey(''); }
   };
 
   const removeMakeupStudent = (studentId: string, fullName: string) => {
-    confirmAction('보강 학생 제거', `${fullName} 학생을 이 차시에서 제거할까요?\n이 차시에 입력한 출석·숙제·시험 기록과 원래 반 차시의 보강 연결도 함께 정리됩니다.`, () => {
+    confirmAction('참여 학생 제거', `${fullName} 학생을 이 차시에서 제거할까요?\n이 차시에 입력한 출석·숙제·시험 기록도 함께 삭제됩니다.`, () => {
       void (async () => {
         setBusyKey(`remove-makeup-${studentId}`); setActionError(''); setNotice('');
         try {
           await removeSupabaseMakeupParticipant(classId, sessionId, studentId);
           await load(false);
-          setNotice(`${fullName} 학생의 보강 참여를 제거했습니다.`);
+          setNotice(`${fullName} 학생을 이 차시에서 제거했습니다.`);
         } catch (error) { setActionError(errorText(error)); }
         finally { setBusyKey(''); }
       })();
@@ -594,12 +614,9 @@ function SessionWorkspaceScreen() {
           <View style={styles.tableHeaderActions}>
             {canManage && (
               <Pressable disabled={Boolean(busyKey)} style={[styles.makeupAddButton, Boolean(busyKey) && styles.disabled]} onPress={() => void openMakeupModal()}>
-                <Ionicons name="person-add-outline" size={17} color="#4338CA" /><Text style={styles.makeupAddText}>다른 반 보강 학생</Text>
+                <Ionicons name="person-add-outline" size={17} color="#4338CA" /><Text style={styles.makeupAddText}>{workspace.classKind === 'clinic' ? '클리닉 참여 학생' : '다른 반 보강 학생'}</Text>
               </Pressable>
             )}
-            <Pressable disabled={Boolean(busyKey) || workspace.students.length === 0} style={[styles.saveAllButton, (Boolean(busyKey) || workspace.students.length === 0) && styles.disabled]} onPress={() => void saveAll()}>
-              {busyKey === 'save-all' ? <ActivityIndicator color="#FFFFFF" /> : <><Ionicons name="save-outline" size={18} color="#FFFFFF" /><Text style={styles.saveAllText}>전체 저장</Text></>}
-            </Pressable>
           </View>
         </View>
 
@@ -630,8 +647,8 @@ function SessionWorkspaceScreen() {
 
         {workspace.students.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>이 날짜에 수강 중인 학생이 없습니다.</Text>
-            <Text style={styles.emptyDescription}>수업 화면으로 돌아가 학생을 먼저 등록해 주세요.</Text>
+            <Text style={styles.emptyTitle}>{workspace.classKind === 'clinic' ? '클리닉 참여 학생이 없습니다.' : '이 날짜에 수강 중인 학생이 없습니다.'}</Text>
+            <Text style={styles.emptyDescription}>{workspace.classKind === 'clinic' ? '위의 클리닉 참여 학생 버튼에서 같은 분기의 학생을 추가해 주세요.' : '수업 화면으로 돌아가 학생을 먼저 등록해 주세요.'}</Text>
           </View>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableScroller}>
@@ -654,9 +671,9 @@ function SessionWorkspaceScreen() {
                     <View style={[styles.bodyCell, styles.studentCell, { width: widths.student }]}>
                       <Text style={styles.studentName}>{student.fullName}</Text>
                       <Text style={styles.studentCode}>{student.studentCode}</Text>
-                      {student.participationType === 'makeup' && (
+                      {(student.participationType === 'makeup' || student.participationType === 'clinic') && (
                         <>
-                          <Text style={styles.makeupBadge}>보강 참여 · {student.homeClassName || '다른 반'}{student.homeSessionLabel ? ` · ${student.homeSessionLabel}` : ''}</Text>
+                          <Text style={styles.makeupBadge}>{student.participationType === 'clinic' ? '클리닉 참여' : '보강 참여'} · {student.homeClassName || '다른 반'}{student.homeSessionLabel ? ` · ${student.homeSessionLabel}` : ''}</Text>
                           {canManage && <Pressable onPress={() => removeMakeupStudent(student.id, student.fullName)}><Text style={styles.removeMakeupText}>이 차시에서 제거</Text></Pressable>}
                         </>
                       )}
@@ -666,7 +683,7 @@ function SessionWorkspaceScreen() {
                     </View>
                     <View style={[styles.bodyCell, { width: widths.attendance }]}>
                       <View style={styles.pickerFrame}>
-                        <Picker enabled={!linkedMakeup?.makeupHostSessionId} selectedValue={draft.attendance.status} onValueChange={(value) => setAttendance(student.id, value as AttendanceStatus | '')} style={styles.picker}>
+                        <Picker enabled={!busyKey && !linkedMakeup?.makeupHostSessionId} selectedValue={draft.attendance.status} onValueChange={(value) => setAttendance(student.id, value as AttendanceStatus | '')} style={styles.picker}>
                           {attendanceOptions.map((option) => <Picker.Item key={option.value || 'blank'} label={option.label} value={option.value} />)}
                         </Picker>
                       </View>
@@ -680,20 +697,20 @@ function SessionWorkspaceScreen() {
                       ) : draft.attendance.status === '보강' ? (
                         <>
                           <View style={styles.makeupRow}>
-                            <TextInput value={draft.attendance.makeupDate} onChangeText={(makeupDate) => patchAttendance(student.id, { makeupDate })} style={[styles.gridInput, styles.dateInput]} placeholder="YYYY-MM-DD" placeholderTextColor="#9CA3AF" />
-                            <TextInput value={draft.attendance.makeupTime} onChangeText={(makeupTime) => patchAttendance(student.id, { makeupTime })} style={[styles.gridInput, styles.timeInput]} placeholder="HH:MM" placeholderTextColor="#9CA3AF" />
+                            <TextInput value={draft.attendance.makeupDate} onChangeText={(makeupDate) => patchAttendance(student.id, { makeupDate })} style={[styles.gridInput, styles.dateInput]} placeholder="YYYY-MM-DD" placeholderTextColor="#9CA3AF" editable={!busyKey} />
+                            <TextInput value={draft.attendance.makeupTime} onChangeText={(makeupTime) => patchAttendance(student.id, { makeupTime })} style={[styles.gridInput, styles.timeInput]} placeholder="HH:MM" placeholderTextColor="#9CA3AF" editable={!busyKey} />
                           </View>
-                          <TextInput value={draft.attendance.makeupNote} onChangeText={(makeupNote) => patchAttendance(student.id, { makeupNote })} style={styles.gridInput} placeholder="예: 일요일 보강" placeholderTextColor="#9CA3AF" />
+                          <TextInput value={draft.attendance.makeupNote} onChangeText={(makeupNote) => patchAttendance(student.id, { makeupNote })} style={styles.gridInput} placeholder="예: 일요일 보강" placeholderTextColor="#9CA3AF" editable={!busyKey} />
                         </>
                       ) : <Text style={styles.mutedText}>보강 선택 시 입력</Text>}
                     </View>
                     <View style={[styles.bodyCell, { width: widths.notes }]}>
-                      <TextInput value={draft.attendance.notes} onChangeText={(notes) => patchAttendance(student.id, { notes })} style={[styles.gridInput, styles.notesInput]} placeholder="선택" placeholderTextColor="#9CA3AF" multiline />
+                      <TextInput value={draft.attendance.notes} onChangeText={(notes) => patchAttendance(student.id, { notes })} style={[styles.gridInput, styles.notesInput]} placeholder="선택" placeholderTextColor="#9CA3AF" multiline editable={!busyKey} />
                     </View>
                     {workspace.homeworks.map((item) => (
                       <View key={item.id} style={[styles.bodyCell, { width: widths.homework }]}>
                         <View style={styles.pickerFrame}>
-                          <Picker selectedValue={draft.homework[item.id]?.grade ?? ''} onValueChange={(value) => setHomeworkGrade(student.id, item.id, value as HomeworkGrade | '')} style={styles.picker}>
+                          <Picker enabled={!busyKey} selectedValue={draft.homework[item.id]?.grade ?? ''} onValueChange={(value) => setHomeworkGrade(student.id, item.id, value as HomeworkGrade | '')} style={styles.picker}>
                             {homeworkOptions.map((option) => <Picker.Item key={option.value || 'blank'} label={option.label} value={option.value} />)}
                           </Picker>
                         </View>
@@ -704,7 +721,7 @@ function SessionWorkspaceScreen() {
                       return (
                         <View key={item.id} style={[styles.bodyCell, { width: item.resultType === 'memo' ? widths.testMemo : widths.test }]}>
                           <View style={styles.pickerFrame}>
-                            <Picker selectedValue={value.mode} onValueChange={(mode) => patchTest(student.id, item.id, {
+                            <Picker enabled={!busyKey} selectedValue={value.mode} onValueChange={(mode) => patchTest(student.id, item.id, {
                               mode: mode as TestMode,
                               ...(mode === 'score' ? {} : { score: '' }),
                               ...(mode === 'memo' ? {} : { resultText: '' }),
@@ -714,8 +731,8 @@ function SessionWorkspaceScreen() {
                               <Picker.Item label="결시" value="absent" />
                             </Picker>
                           </View>
-                          {value.mode === 'score' && <TextInput value={value.score} onChangeText={(score) => patchTest(student.id, item.id, { mode: 'score', score })} style={styles.gridInput} placeholder={`0 ~ ${item.maxScore}`} placeholderTextColor="#9CA3AF" keyboardType="decimal-pad" />}
-                          {value.mode === 'memo' && <TextInput value={value.resultText} onChangeText={(resultText) => patchTest(student.id, item.id, { mode: 'memo', resultText })} style={styles.gridInput} placeholder="예: 통과, 재시" placeholderTextColor="#9CA3AF" maxLength={200} />}
+                          {value.mode === 'score' && <TextInput value={value.score} onChangeText={(score) => patchTest(student.id, item.id, { mode: 'score', score })} style={styles.gridInput} placeholder={`0 ~ ${item.maxScore}`} placeholderTextColor="#9CA3AF" keyboardType="decimal-pad" editable={!busyKey} />}
+                          {value.mode === 'memo' && <TextInput value={value.resultText} onChangeText={(resultText) => patchTest(student.id, item.id, { mode: 'memo', resultText })} style={styles.gridInput} placeholder="예: 통과, 재시" placeholderTextColor="#9CA3AF" maxLength={200} editable={!busyKey} />}
                         </View>
                       );
                     })}
@@ -727,21 +744,25 @@ function SessionWorkspaceScreen() {
         )}
 
         {workspace.students.length > 0 && (
-          <Pressable disabled={Boolean(busyKey)} style={[styles.bottomSaveButton, Boolean(busyKey) && styles.disabled]} onPress={() => void saveAll()}>
+          <Pressable disabled={Boolean(busyKey) || refreshing || !hasDraftChanges} style={[styles.bottomSaveButton, (Boolean(busyKey) || refreshing || !hasDraftChanges) && styles.disabled]} onPress={() => void saveAll()}>
             {busyKey === 'save-all' ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.bottomSaveText}>전체 저장</Text>}
           </Pressable>
         )}
+        <TestQuestionSheet classId={classId} sessionId={sessionId} sessionDate={workspace.sessionDate}
+          classLabel={routeTitle || '수업'} tests={workspace.tests} students={workspace.students} />
       </ScrollView>
 
       <Modal visible={makeupModalVisible} transparent animationType="fade" onRequestClose={() => setMakeupModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>다른 반 보강 학생 추가</Text>
+              <Text style={styles.modalTitle}>{workspace.classKind === 'clinic' ? '클리닉 참여 학생 추가' : '다른 반 보강 학생 추가'}</Text>
               <Pressable accessibilityLabel="닫기" onPress={() => setMakeupModalVisible(false)}><Ionicons name="close" size={24} color="#4B5563" /></Pressable>
             </View>
             <View style={styles.modalBody}>
-              <Text style={styles.modalGuide}>원래 수업 A의 차시와 실제로 보강하는 이 수업 B의 차시를 연결합니다. B가 A보다 먼저여도 괜찮습니다. B에서 출석·숙제·시험을 입력하고 A에는 다른 반 보강 상태가 자동으로 남습니다.</Text>
+              <Text style={styles.modalGuide}>{workspace.classKind === 'clinic'
+                ? '같은 분기의 정식 수강생을 이 클리닉 차시에 추가합니다. 원래 수업의 수강 상태는 유지되고 클리닉 출석·숙제·시험은 전체 학생 기록에 표시됩니다.'
+                : '원래 수업 A의 차시와 실제로 보강하는 이 수업 B의 차시를 연결합니다. B가 A보다 먼저여도 괜찮습니다. B에서 출석·숙제·시험을 입력하고 A에는 다른 반 보강 상태가 자동으로 남습니다.'}</Text>
               <Text style={styles.setupLabel}>학생과 원래 반</Text>
               <View style={styles.pickerFrame}>
                 <Picker selectedValue={makeupCandidateKey} onValueChange={(value) => void changeMakeupCandidate(String(value))} style={styles.picker}>
@@ -751,6 +772,7 @@ function SessionWorkspaceScreen() {
                   ))}
                 </Picker>
               </View>
+              {workspace.classKind !== 'clinic' && <>
               <Text style={[styles.setupLabel, { marginTop: 14 }]}>원래 수업에서 보강으로 처리할 차시</Text>
               {makeupSessionsLoading ? <ActivityIndicator color="#4F46E5" /> : (
                 <View style={styles.pickerFrame}>
@@ -760,12 +782,13 @@ function SessionWorkspaceScreen() {
                   </Picker>
                 </View>
               )}
+              </>}
               <Text style={[styles.setupLabel, { marginTop: 14 }]}>메모 (선택)</Text>
               <TextInput value={makeupNotes} onChangeText={setMakeupNotes} style={styles.input} placeholder="예: 이번 주 1회 보강" placeholderTextColor="#9CA3AF" />
             </View>
             <View style={styles.modalActions}>
               <Pressable style={styles.modalCancel} disabled={Boolean(busyKey)} onPress={() => setMakeupModalVisible(false)}><Text style={styles.modalCancelText}>취소</Text></Pressable>
-              <Pressable style={[styles.modalSave, (!makeupCandidateKey || !makeupHomeSessionId || makeupSessionsLoading || Boolean(busyKey)) && styles.disabled]} disabled={!makeupCandidateKey || !makeupHomeSessionId || makeupSessionsLoading || Boolean(busyKey)} onPress={() => void addMakeupStudent()}>
+              <Pressable style={[styles.modalSave, (!makeupCandidateKey || (workspace.classKind !== 'clinic' && !makeupHomeSessionId) || makeupSessionsLoading || Boolean(busyKey)) && styles.disabled]} disabled={!makeupCandidateKey || (workspace.classKind !== 'clinic' && !makeupHomeSessionId) || makeupSessionsLoading || Boolean(busyKey)} onPress={() => void addMakeupStudent()}>
                 {busyKey === 'add-makeup' ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modalSaveText}>차시에 추가</Text>}
               </Pressable>
             </View>
@@ -835,8 +858,6 @@ const styles = StyleSheet.create({
   tableHeaderActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
   makeupAddButton: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 13, borderRadius: 10, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#EEF2FF' },
   makeupAddText: { color: '#4338CA', fontSize: 12, fontWeight: '800' },
-  saveAllButton: { minWidth: 118, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 15, paddingVertical: 11, borderRadius: 10, backgroundColor: '#4F46E5' },
-  saveAllText: { color: '#FFFFFF', fontWeight: '800' },
   statisticsPanel: { marginBottom: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#D1FAE5', backgroundColor: '#F0FDF4' },
   statisticsTitle: { color: '#065F46', fontSize: 15, fontWeight: '900' },
   statisticsHint: { marginTop: 3, color: '#047857', fontSize: 11 },

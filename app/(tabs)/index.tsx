@@ -13,7 +13,7 @@ import AssistantFormModal, {
 // Firebase & Auth
 import auth from '@react-native-firebase/auth';
 import { signOut } from 'firebase/auth';
-import { webAuth } from '../../firebaseConfig'; 
+import { webAuth } from '../../firebaseConfig';
 
 // Utils & Config
 import { getCurrentUserEmail } from '../../utils/currentUser';
@@ -38,7 +38,7 @@ type WorkRow = {
 };
 
 function parseSheetDate(dateStr: string): Date | null {
-  const cleaned = String(dateStr || "").replace(/[\s\.]/g, "-").replace(/-+/g, "-"); 
+  const cleaned = String(dateStr || "").replace(/[\s\.]/g, "-").replace(/-+/g, "-");
   const dt = new Date(cleaned);
   return isNaN(dt.getTime()) ? null : dt;
 }
@@ -86,10 +86,10 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>("");
-  
+
   // 상태 관리
   const [androidId, setAndroidId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false); 
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isManager, setIsManager] = useState(false);
 
   // 모달 관련 상태
@@ -145,10 +145,10 @@ export default function HomeScreen() {
     try {
       // 1. [조교 정보] 시트 먼저 조회 (보안 체크)
       const assistantData = await fetchSheetData(CSV_URLS.ASSISTANT_INFO);
-      
+
       let myRecord = null;
       if (Array.isArray(assistantData)) {
-        myRecord = assistantData.find((r: any) => 
+        myRecord = assistantData.find((r: any) =>
           String(r[ASSISTANT_HEADERS.EMAIL] || "").trim().toLowerCase() === userData.email.trim().toLowerCase()
         );
       }
@@ -157,15 +157,15 @@ export default function HomeScreen() {
       if (!myRecord) {
         // 1) 경고창 띄우기
         showAlert(
-          "로그인 거부", 
+          "로그인 거부",
           "귀하의 정보가 [조교 정보] 시트에 등록되어 있지 않습니다.\n\n앱을 사용하려면 Admin 또는 Manager에게\n조교 정보 추가를 먼저 요청해주세요."
         );
-        
+
         // 2) 강제 로그아웃 (즉시 튕겨냄)
-        handleLogout(); 
-        
+        handleLogout();
+
         // 3) 함수 종료 (권한 관리 시트에 등록하지 않음)
-        return; 
+        return;
       }
 
       // 2. 통과된 경우: 시트에 있는 실명 가져오기
@@ -175,9 +175,9 @@ export default function HomeScreen() {
       // 3. [앱 권한 관리] 시트에 등록 요청 (실명 사용)
       await postSheetData(API_URLS.ASSISTANT_MGMT, SHEET_NAMES.PERMISSIONS, {
         action: "register_user",
-        name: finalName, 
+        name: finalName,
         email: userData.email,
-        deviceId: dId || "", 
+        deviceId: dId || "",
       });
 
     } catch (e) {
@@ -219,7 +219,7 @@ export default function HomeScreen() {
 
     const data = await fetchSheetData(CSV_URLS.ATTENDANCE_LOG);
     const myEmail = email.trim().toLowerCase();
-    
+
     const myRows: WorkRow[] = (data || [])
       .filter((r: any) => {
         const rowEmail = (r[ATTENDANCE_LOG_HEADERS.WORKER_EMAIL] ||  "").trim().toLowerCase();
@@ -313,14 +313,14 @@ export default function HomeScreen() {
       showAlert("알림", "이메일을 입력해주세요.");
       return;
     }
-    
+
     setProcessing(true);
-    
+
     try {
       // Admin 등록 시: Device ID 존재 여부 확인 (보안)
       if (targetRole === 'Admin') {
         const data = await fetchSheetData(CSV_URLS.PERMISSIONS);
-        const targetUser = data.find((r: any) => 
+        const targetUser = data.find((r: any) =>
           String(r[PERMISSION_HEADERS.EMAIL] || "").trim() === targetEmail.trim()
         );
 
@@ -406,8 +406,8 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView 
-        contentContainerStyle={styles.container} 
+      <ScrollView
+        contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <Text style={styles.headerTitle}>마이 페이지</Text>
@@ -415,7 +415,7 @@ export default function HomeScreen() {
         {user && (
           <View style={styles.card}>
             {user.photoURL && <Image source={{ uri: user.photoURL }} style={styles.avatar} />}
-            
+
             {androidId && (
               <View style={{ alignItems: 'center', marginBottom: 16 }}>
                 <Text style={{ fontSize: 12, color: '#999', marginBottom: 2 }}>Device ID</Text>
@@ -440,7 +440,7 @@ export default function HomeScreen() {
                 <TouchableOpacity style={styles.reqBtnAdmin} onPress={() => openAddModal("Admin")}>
                   <Text style={styles.reqBtnText}>+ Admin 추가</Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity style={styles.reqBtnManager} onPress={() => openAddModal("Manager")}>
                   <Text style={styles.reqBtnText}>+ Manager 추가</Text>
                 </TouchableOpacity>
@@ -448,8 +448,8 @@ export default function HomeScreen() {
             )}
 
             {!isSupabaseDataSource && (isAdmin || isManager) && (
-              <TouchableOpacity 
-                style={[styles.reqBtnManager, { marginTop: 10, backgroundColor: '#10B981' }]} 
+              <TouchableOpacity
+                style={[styles.reqBtnManager, { marginTop: 10, backgroundColor: '#10B981' }]}
                 onPress={openAddAssistantModal}
               >
                 <Text style={styles.reqBtnText}>+ 조교 정보 시트에 추가</Text>
@@ -543,7 +543,7 @@ export default function HomeScreen() {
             <Text style={styles.modalDesc}>
               해당 권한을 부여할 사용자의 Gmail을 정확히 입력해주세요. (이미 등록된 유저는 권한이 변경됩니다.)
             </Text>
-            
+
             <TextInput
               style={styles.modalInput}
               placeholder="example@gmail.com"
@@ -555,16 +555,16 @@ export default function HomeScreen() {
             />
 
             <View style={styles.modalBtnRow}>
-              <TouchableOpacity 
-                style={[styles.modalBtn, styles.modalBtnCancel]} 
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
                 onPress={() => setModalVisible(false)}
                 disabled={processing}
               >
                 <Text style={styles.modalBtnTextCancel}>취소</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={[styles.modalBtn, styles.modalBtnConfirm]} 
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnConfirm]}
                 onPress={handleSubmitRole}
                 disabled={processing}
               >
@@ -602,7 +602,7 @@ const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: '#f5f5f5', padding: 20, alignItems: 'center' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 20, color: '#333' },
-  
+
   card: { width: '100%', maxWidth: 500, backgroundColor: 'white', borderRadius: 16, padding: 20, elevation: 3 },
   avatar: { width: 80, height: 80, borderRadius: 40, alignSelf: 'center', marginBottom: 16, backgroundColor: '#eee' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#555', marginBottom: 8 },
   pickerBox: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, overflow: 'hidden' },
-  
+
   tableTitle: { fontSize: 16, fontWeight: '700', color: '#222', marginBottom: 8 },
   table: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, overflow: 'hidden' },
   trHead: { flexDirection: 'row', backgroundColor: '#f9f9f9', paddingVertical: 10 },

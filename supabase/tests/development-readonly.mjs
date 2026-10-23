@@ -5,7 +5,7 @@ const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 assert.equal(url, 'https://xhyzngxwxeooffmcaxyl.supabase.co');
 assert.ok(key?.startsWith('sb_publishable_'));
-const classSelect = encodeURIComponent('id,term_label,school,subject,weekdays,default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))');
+const classSelect = encodeURIComponent('id,term_label,school,subject,weekdays,day_part,class_kind,class_weekday_times(weekday,day_part,start_time,end_time),default_start_time,default_end_time,default_hourly_rate_krw,is_active,location:locations(id,name,latitude,longitude,notes),class_staff(staff:staff(id,full_name))');
 for (const path of [
   'students?select=id&limit=1',
   'staff_private_details?select=staff_id&limit=1',
@@ -13,6 +13,7 @@ for (const path of [
   'class_terms?select=label,is_active&order=label.desc',
   'locations?select=id,name,latitude,longitude,notes&order=name.asc',
   'session_participants?select=session_id,student_id&limit=1',
+  'class_weekday_times?select=class_id,weekday&limit=1',
   'message_deliveries?select=message_id%2Cmessage%3Amessages!inner%28class_id%29&status=eq.pending&message.class_id=eq.1',
 ]) {
   const r = await fetch(`${url}/rest/v1/${path}`, { headers: { apikey:key }, signal:AbortSignal.timeout(15000) });
@@ -62,6 +63,16 @@ for (const [name, body] of [
     target_class_id: null, target_term_label: 'DENIED', target_school: 'DENIED', target_subject: 'DENIED',
     target_location_id: null, target_weekdays: [], target_start_time: null, target_end_time: null,
     target_hourly_rate_krw: null, target_is_active: true, target_staff_ids: [], target_day_part: '저녁',
+  }],
+  ['save_managed_class_v2', {
+    target_class_id: null, target_term_label: 'DENIED', target_kind: 'clinic',
+    target_school: null, target_subject: null, target_location_id: null,
+    target_weekday_schedule: [], target_hourly_rate_krw: null,
+    target_is_active: true, target_staff_ids: [],
+  }],
+  ['add_clinic_participant', {
+    target_host_class_id: 1, target_session_id: 1, target_student_id: 1,
+    target_home_class_id: 2, new_notes: '',
   }],
   ['archive_managed_class', { target_class_id: 1 }],
   ['delete_managed_class', { target_class_id: 1 }],

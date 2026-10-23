@@ -170,6 +170,7 @@ export async function finishMyWorkShift(): Promise<void> {
 
 export type WorkLogDraft = {
   staffId: string;
+  classId?: string;
   workLabel: string;
   date: string;
   startTime: string;
@@ -188,16 +189,18 @@ export async function saveManagedWorkLog(id: string | null, draft: WorkLogDraft)
   const end = draft.endTime.trim();
   const label = draft.workLabel.trim();
   const rate = draft.hourlyRateKrw.trim();
+  if (!draft.staffId.trim()) throw new Error('근무자를 선택해 주세요.');
   if (!isValidDate(date)) throw new Error('근무 날짜는 YYYY-MM-DD 형식으로 입력해 주세요.');
-  if (!timePattern.test(start) || !timePattern.test(end)) throw new Error('출퇴근 시간은 HH:MM 형식으로 입력해 주세요.');
+  if (!timePattern.test(start) || (end && !timePattern.test(end))) throw new Error('출퇴근 시간은 HH:MM 형식으로 입력해 주세요.');
   if (!label) throw new Error('수업 또는 근무명을 입력해 주세요.');
   if (rate && (!/^\d+$/.test(rate) || Number(rate) > 1000000)) throw new Error('시급은 0 이상의 정수로 입력해 주세요.');
-  const endDate = end < start
+  const endDate = end && end < start
     ? new Date(Date.parse(`${date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)
     : date;
   const payload = {
     staff_id: draft.staffId, work_label: label,
-    started_at: kstTimestamp(date, start), ended_at: kstTimestamp(endDate, end),
+    ...(draft.classId !== undefined ? { class_id: draft.classId } : {}),
+    started_at: kstTimestamp(date, start), ended_at: end ? kstTimestamp(endDate, end) : null,
     hourly_rate_krw: rate ? Number(rate) : null, notes: draft.notes.trim() || null,
   };
   const query = id

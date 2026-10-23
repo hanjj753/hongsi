@@ -29,6 +29,7 @@ import {
   type ManagedClassTerm,
   type ManagedLocation,
 } from '../lib/classData';
+import { getDatabaseUsageBytes, SUPABASE_FREE_DATABASE_LIMIT_BYTES } from '../lib/databaseUsage';
 
 type Props = { onChanged: () => Promise<void> | void };
 
@@ -41,7 +42,8 @@ const dayPartOptions = ['오전', '오후', '저녁'] as const;
 
 const emptyClass = (termLabel: string): ManagedClassInput => ({
   id: '', termLabel, school: '', subject: '', locationId: '', weekdays: [],
-  dayPart: '', startTime: '', endTime: '', hourlyRateKrw: '', staffIds: [], isActive: true,
+  classKind: 'regular', weekdaySchedule: [], dayPart: '', startTime: '', endTime: '',
+  hourlyRateKrw: '', staffIds: [], isActive: true,
 });
 
 function errorText(error: unknown): string {
@@ -51,6 +53,7 @@ function errorText(error: unknown): string {
   if (message.includes('Term label already exists') || message.includes('duplicate key')) return '이미 등록된 분기 이름입니다.';
   if (message.includes('classes_time_pair')) return '시작 시간과 종료 시간을 함께 입력해 주세요.';
   if (message.includes('classes_name_present')) return '학교 또는 과목을 입력해 주세요.';
+  if (message.includes('classes_one_clinic_per_term')) return '이 분기에는 클리닉 수업이 이미 있습니다.';
   return message || '요청을 처리하지 못했습니다.';
 }
 
@@ -67,6 +70,9 @@ function confirmAction(title: string, message: string, action: () => void) {
 
 export function TermClassManager({ onChanged }: Props) {
   const [visible, setVisible] = useState(false);
+  const [usageBytes, setUsageBytes] = useState<number | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -102,9 +108,19 @@ export function TermClassManager({ onChanged }: Props) {
     }
   }, []);
 
+  const loadUsage = useCallback(async () => {
+    setUsageLoading(true);
+    setUsageError('');
+    try { setUsageBytes(await getDatabaseUsageBytes()); }
+    catch (cause) { setUsageError(errorText(cause)); }
+    finally { setUsageLoading(false); }
+  }, []);
+
   useEffect(() => {
-    if (visible) void load();
-  }, [load, visible]);
+    if (visible) { void load(); void loadUsage(); }
+  }, [load, loadUsage, visible]);
+
+  const usagePercent = usageBytes == null ? 0 : usageBytes / SUPABASE_FREE_DATABASE_LIMIT_BYTES * 100;
 
   const activeTerms = useMemo(() => terms.filter((item) => item.isActive), [terms]);
   const selectedClasses = useMemo(() => classes
@@ -169,7 +185,11 @@ export function TermClassManager({ onChanged }: Props) {
     setError('');
     setClassDraft({
       id: item.id, termLabel: item.termLabel, school: item.school, subject: item.subject,
-      locationId: item.locationId, weekdays: item.weekdays, dayPart: item.dayPart, startTime: item.startTime,
+      locationId: item.locationId, weekdays: item.weekdays, classKind: item.classKind,
+      weekdaySchedule: item.weekdaySchedule.length ? item.weekdaySchedule
+        : item.weekdays.map((weekday) => ({ weekday, dayPart: item.dayPart || '오후',
+          startTime: item.startTime, endTime: item.endTime })),
+      dayPart: item.dayPart, startTime: item.startTime,
       endTime: item.endTime, hourlyRateKrw: item.hourlyRateKrw,
       staffIds: item.staffIds, isActive: item.isActive,
     });
@@ -181,6 +201,10 @@ export function TermClassManager({ onChanged }: Props) {
     setError('');
     setNotice('');
     try {
+      if (classDraft.classKind === 'clinic' && classes.some((item) =>
+        item.termLabel === classDraft.termLabel && item.classKind === 'clinic' && item.id !== classDraft.id)) {
+        throw new Error('이 분기에는 클리닉 수업이 이미 있습니다.');
+      }
       await saveSupabaseManagedClass({ ...classDraft, isActive: true });
       setClassEditorVisible(false);
       await refreshAll();
@@ -229,10 +253,21 @@ export function TermClassManager({ onChanged }: Props) {
     });
   };
 
-  const toggleWeekday = (day: number) => setClassDraft((current) => ({
-    ...current,
-    weekdays: current.weekdays.includes(day) ? current.weekdays.filter((item) => item !== day) : [...current.weekdays, day],
-  }));
+  const toggleWeekday = (day: number) => setClassDraft((current) => {
+    const selected = current.weekdays.includes(day);
+    return {
+      ...current,
+      weekdays: selected ? current.weekdays.filter((item) => item !== day) : [...current.weekdays, day],
+      weekdaySchedule: selected
+        ? current.weekdaySchedule.filter((item) => item.weekday !== day)
+        : [...current.weekdaySchedule, { weekday: day, dayPart: '오후', startTime: '', endTime: '' }],
+    };
+  });
+  const patchWeekday = (day: number, patch: Partial<ManagedClassInput['weekdaySchedule'][number]>) =>
+    setClassDraft((current) => ({ ...current,
+      weekdaySchedule: current.weekdaySchedule.map((item) =>
+        item.weekday === day ? { ...item, ...patch } : item),
+    }));
   const toggleStaff = (staffId: string) => setClassDraft((current) => ({
     ...current,
     staffIds: current.staffIds.includes(staffId)
@@ -265,6 +300,24 @@ export function TermClassManager({ onChanged }: Props) {
 
             {loading ? <View style={styles.loader}><ActivityIndicator color="#4F46E5" /></View> : (
               <ScrollView contentContainerStyle={styles.managerContent} keyboardShouldPersistTaps="handled">
+                <View style={styles.usageCard}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>DB 사용량</Text>
+                    <Pressable accessibilityRole="button" disabled={usageLoading} onPress={() => void loadUsage()}>
+                      <Text style={styles.usageRefresh}>{usageLoading ? '확인 중...' : '새로고침'}</Text>
+                    </Pressable>
+                  </View>
+                  {usageBytes != null && <>
+                    <Text style={styles.usageValue}>{(usageBytes / 1048576).toFixed(1)} MB / 500 MB · {usagePercent.toFixed(1)}%</Text>
+                    <View style={styles.usageTrack}><View style={[styles.usageFill,
+                      usagePercent >= 80 && styles.usageWarning,
+                      { width: `${Math.min(100, usagePercent)}%` }]} /></View>
+                    {usagePercent >= 80 && <Text style={styles.usageAlert}>용량이 80%를 넘었습니다. 오래된 기록 정리를 검토해 주세요.</Text>}
+                  </>}
+                  {usageBytes == null && usageLoading && <ActivityIndicator color="#4F46E5" />}
+                  {!!usageError && <Text style={styles.errorText}>{usageError}</Text>}
+                  <Text style={styles.usageHelp}>Supabase 무료 플랜의 DB 크기 한도 기준입니다. 데이터·인덱스를 포함한 현재 크기이며 파일 저장소 용량은 별개입니다.</Text>
+                </View>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>분기</Text>
                   <Pressable style={styles.outlineButton} onPress={() => { setTermEditorOriginal(null); setTermDraft(''); }}>
@@ -310,7 +363,9 @@ export function TermClassManager({ onChanged }: Props) {
                       <View key={item.id} style={[styles.classCard, !item.isActive && styles.archivedCard]}>
                         <View style={styles.classCardBody}>
                           <Text style={styles.classTitle}>{formatClassLabel(item)}</Text>
-                          <Text style={styles.classMeta}>{item.startTime && item.endTime ? `${item.startTime}~${item.endTime}` : '시간 미정'} · {item.locationName || '장소 미정'}</Text>
+                          <Text style={styles.classMeta}>{item.weekdaySchedule.map((entry) =>
+                            `${weekdayOptions.find((day) => day.value === entry.weekday)?.label ?? ''} ${entry.dayPart} ${entry.startTime && entry.endTime ? `${entry.startTime}~${entry.endTime}` : '시간 미정'}`
+                          ).join(' · ')} · {item.locationName || '장소 미정'}</Text>
                           {!item.isActive && <Text style={styles.archivedLabel}>삭제됨 · 수정 후 저장하면 복구됩니다</Text>}
                         </View>
                         <View style={styles.actionRow}>
@@ -337,26 +392,38 @@ export function TermClassManager({ onChanged }: Props) {
             <ScrollView contentContainerStyle={styles.classForm} keyboardShouldPersistTaps="handled">
               <Text style={styles.label}>분기</Text>
               <View style={styles.pickerFrame}><Picker selectedValue={classDraft.termLabel} onValueChange={(termLabel) => setClassDraft((current) => ({ ...current, termLabel: String(termLabel) }))} style={styles.picker}>{activeTerms.map((term) => <Picker.Item key={term.label} label={term.label} value={term.label} />)}</Picker></View>
-              <View style={styles.twoColumns}>
+              <Pressable style={styles.clinicToggle} disabled={Boolean(classDraft.id)}
+                onPress={() => setClassDraft((current) => ({
+                  ...current, classKind: current.classKind === 'clinic' ? 'regular' : 'clinic',
+                  school: '', subject: '',
+                }))}>
+                <Text style={styles.clinicToggleText}>{classDraft.classKind === 'clinic' ? '☑' : '☐'} 클리닉 수업</Text>
+                <Text style={styles.fieldHelp}>분기마다 1개 · 같은 분기의 모든 반 학생이 차시에 참여 가능</Text>
+              </Pressable>
+              {classDraft.classKind === 'regular' && <View style={styles.twoColumns}>
                 <View style={styles.field}><Text style={styles.label}>학교</Text><TextInput style={styles.input} value={classDraft.school} onChangeText={(school) => setClassDraft((current) => ({ ...current, school }))} placeholder="예: 경기고" placeholderTextColor="#9CA3AF" /></View>
                 <View style={styles.field}><Text style={styles.label}>과목</Text><TextInput style={styles.input} value={classDraft.subject} onChangeText={(subject) => setClassDraft((current) => ({ ...current, subject }))} placeholder="예: 통합과학" placeholderTextColor="#9CA3AF" /></View>
-              </View>
-              <View style={styles.scheduleFields}>
-                <View style={styles.scheduleDays}>
-                  <Text style={styles.label}>요일</Text>
-                  <View style={styles.weekdays}>{weekdayOptions.map((option) => { const selected = classDraft.weekdays.includes(option.value); return <Pressable key={option.value} style={[styles.weekday, selected && styles.weekdayActive]} onPress={() => toggleWeekday(option.value)}><Text style={[styles.weekdayText, selected && styles.weekdayTextActive]}>{option.label}</Text></Pressable>; })}</View>
+              </View>}
+              <Text style={styles.label}>요일</Text>
+              <View style={styles.weekdays}>{weekdayOptions.map((option) => { const selected = classDraft.weekdays.includes(option.value); return <Pressable key={option.value} style={[styles.weekday, selected && styles.weekdayActive]} onPress={() => toggleWeekday(option.value)}><Text style={[styles.weekdayText, selected && styles.weekdayTextActive]}>{option.label}</Text></Pressable>; })}</View>
+              {classDraft.weekdaySchedule.slice().sort((a, b) => a.weekday - b.weekday).map((entry) => (
+                <View key={entry.weekday} style={styles.weekdayScheduleRow}>
+                  <Text style={styles.weekdayScheduleTitle}>{weekdayOptions.find((day) => day.value === entry.weekday)?.label}요일</Text>
+                  <View style={styles.dayParts}>{dayPartOptions.map((part) => {
+                    const selected = entry.dayPart === part;
+                    return <Pressable key={part} style={[styles.dayPart, selected && styles.dayPartActive]}
+                      onPress={() => patchWeekday(entry.weekday, { dayPart: part })}>
+                      <Text style={[styles.dayPartText, selected && styles.dayPartTextActive]}>{part}</Text>
+                    </Pressable>;
+                  })}</View>
+                  <View style={styles.twoColumns}>
+                    <View style={styles.field}><Text style={styles.label}>시작 시간</Text><TextInput style={styles.input} value={entry.startTime} onChangeText={(startTime) => patchWeekday(entry.weekday, { startTime })} placeholder="HH:MM" placeholderTextColor="#9CA3AF" /></View>
+                    <View style={styles.field}><Text style={styles.label}>종료 시간</Text><TextInput style={styles.input} value={entry.endTime} onChangeText={(endTime) => patchWeekday(entry.weekday, { endTime })} placeholder="HH:MM" placeholderTextColor="#9CA3AF" /></View>
+                  </View>
                 </View>
-                <View style={styles.schedulePart}>
-                  <Text style={styles.label}>시간대 *</Text>
-                  <View style={styles.dayParts}>{dayPartOptions.map((part) => { const selected = classDraft.dayPart === part; return <Pressable key={part} style={[styles.dayPart, selected && styles.dayPartActive]} onPress={() => setClassDraft((current) => ({ ...current, dayPart: part }))}><Text style={[styles.dayPartText, selected && styles.dayPartTextActive]}>{part}</Text></Pressable>; })}</View>
-                </View>
-              </View>
+              ))}
               <Text style={styles.label}>장소</Text>
               <View style={styles.pickerFrame}><Picker selectedValue={classDraft.locationId} onValueChange={(locationId) => setClassDraft((current) => ({ ...current, locationId: String(locationId) }))} style={styles.picker}><Picker.Item label="선택 안 함" value="" />{locations.map((location) => <Picker.Item key={location.id} label={location.name} value={location.id} />)}</Picker></View>
-              <View style={styles.twoColumns}>
-                <View style={styles.field}><Text style={styles.label}>시작 시간</Text><TextInput style={styles.input} value={classDraft.startTime} onChangeText={(startTime) => setClassDraft((current) => ({ ...current, startTime }))} placeholder="HH:MM" placeholderTextColor="#9CA3AF" /></View>
-                <View style={styles.field}><Text style={styles.label}>종료 시간</Text><TextInput style={styles.input} value={classDraft.endTime} onChangeText={(endTime) => setClassDraft((current) => ({ ...current, endTime }))} placeholder="HH:MM" placeholderTextColor="#9CA3AF" /></View>
-              </View>
               <Text style={styles.label}>기본 시급</Text>
               <TextInput style={styles.input} value={classDraft.hourlyRateKrw} onChangeText={(hourlyRateKrw) => setClassDraft((current) => ({ ...current, hourlyRateKrw }))} placeholder="예: 15000" placeholderTextColor="#9CA3AF" keyboardType="number-pad" />
               <Text style={styles.label}>기본 예정 근무자</Text>
@@ -387,6 +454,14 @@ export function TermClassManager({ onChanged }: Props) {
 }
 
 const styles = StyleSheet.create({
+  usageCard: { padding: 14, backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#CBD5E1', gap: 8 },
+  usageRefresh: { color: '#4F46E5', fontWeight: '800', fontSize: 13 },
+  usageValue: { color: '#111827', fontWeight: '800', fontSize: 17 },
+  usageTrack: { height: 10, borderRadius: 8, backgroundColor: '#E5E7EB', overflow: 'hidden' },
+  usageFill: { height: '100%', backgroundColor: '#4F46E5' },
+  usageWarning: { backgroundColor: '#EA580C' },
+  usageAlert: { color: '#C2410C', fontWeight: '700', fontSize: 12 },
+  usageHelp: { color: '#6B7280', fontSize: 12, lineHeight: 18 },
   trigger: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#FFFFFF', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE' },
   triggerText: { color: '#4F46E5', fontWeight: '700', fontSize: 13 }, pressed: { opacity: 0.7 },
   overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 14, backgroundColor: 'rgba(0,0,0,0.48)' },
@@ -414,6 +489,10 @@ const styles = StyleSheet.create({
   weekdays: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, weekday: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#F3F4F6' }, weekdayActive: { backgroundColor: '#4F46E5' }, weekdayText: { color: '#4B5563', fontWeight: '700' }, weekdayTextActive: { color: '#FFFFFF' },
   scheduleFields: { flexDirection: 'row', flexWrap: 'wrap', gap: 15 }, scheduleDays: { flexGrow: 1, minWidth: 250 }, schedulePart: { flexGrow: 1, minWidth: 190 },
   dayParts: { flexDirection: 'row', gap: 7 }, dayPart: { paddingHorizontal: 12, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: '#F3F4F6' }, dayPartActive: { backgroundColor: '#4F46E5' }, dayPartText: { color: '#4B5563', fontWeight: '700' }, dayPartTextActive: { color: '#FFFFFF' },
+  clinicToggle: { marginTop: 12, padding: 10, borderRadius: 8, backgroundColor: '#EEF2FF' },
+  clinicToggleText: { color: '#4338CA', fontWeight: '800', fontSize: 14 },
+  weekdayScheduleRow: { marginTop: 11, padding: 11, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 9 },
+  weekdayScheduleTitle: { fontWeight: '800', color: '#111827' },
   fieldHelp: { marginBottom: 8, color: '#6B7280', fontSize: 12 }, staffOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, staffOption: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 18, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF' }, staffOptionActive: { borderColor: '#4F46E5', backgroundColor: '#EEF2FF' }, staffOptionText: { color: '#6B7280', fontWeight: '700' }, staffOptionTextActive: { color: '#4338CA' },
   footerButtons: { flexDirection: 'row', gap: 9 }, cancelButton: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 9, backgroundColor: '#E5E7EB' }, cancelText: { color: '#374151', fontWeight: '800' }, confirmButton: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 9, backgroundColor: '#4F46E5' }, confirmText: { color: '#FFFFFF', fontWeight: '800' }, disabled: { opacity: 0.5 },
 });

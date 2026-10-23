@@ -89,13 +89,16 @@ const formatLocalDate = (date: Date) =>
 const weekdaysFromText = (value: string) =>
   WEEKDAY_OPTIONS.filter(option => String(value || "").includes(option.label)).map(option => option.value);
 
-const buildRecurringDates = (startYmd: string, weekdays: number[], count: number) => {
+const buildRecurringDates = (startYmd: string, weekdays: number[], weeks: number | null, untilYmd: string) => {
   const cursor = parseLocalDate(startYmd);
-  if (!cursor || weekdays.length === 0 || count < 1) return [];
+  const until = weeks == null ? parseLocalDate(untilYmd) : null;
+  if (!cursor || weekdays.length === 0 || (weeks == null && (!until || until < cursor))
+    || (weeks != null && (!Number.isInteger(weeks) || weeks < 1 || weeks > 52))) return [];
   const selected = new Set(weekdays);
   const dates: string[] = [];
-
-  for (let offset = 0; offset < 730 && dates.length < count; offset += 1) {
+  const maxDays = weeks == null ? 730 : weeks * 7;
+  for (let offset = 0; offset < maxDays && dates.length <= 60; offset += 1) {
+    if (until && cursor > until) break;
     if (selected.has(cursor.getDay())) dates.push(formatLocalDate(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -142,7 +145,9 @@ function ClassDetailScreen() {
   const [assignableStaff, setAssignableStaff] = useState<AssignableStaff[]>([]);
   const [scheduleStaffIds, setScheduleStaffIds] = useState<string[]>([]);
   const [scheduleMode, setScheduleMode] = useState<"single" | "repeat">("single");
-  const [repeatCount, setRepeatCount] = useState("8");
+  const [repeatLimit, setRepeatLimit] = useState<"weeks" | "until">("weeks");
+  const [repeatWeeks, setRepeatWeeks] = useState("8");
+  const [repeatUntil, setRepeatUntil] = useState("");
   const [repeatWeekdays, setRepeatWeekdays] = useState<number[]>([]);
 
   const [template, setTemplate] = useState(INDIVIDUAL_MESSAGE_TEMPLATE);
@@ -298,14 +303,14 @@ function ClassDetailScreen() {
     if (!row) return "";
     const school = String(row[CLASSES_HEADERS.SCHOOL] ?? "").trim();
     const subject = String(row[CLASSES_HEADERS.SUBJECT] ?? "").trim();
-    return (school && subject) ? `${school} ${subject}` : (school || subject || "수업");
+    return row.__classKind === 'clinic' ? '클리닉'
+      : (school && subject) ? `${school} ${subject}` : (school || subject || "수업");
   }, [row]);
 
   const recurringDates = useMemo(() => {
-    const count = Number(repeatCount);
-    if (!Number.isInteger(count) || count < 1 || count > 60) return [];
-    return buildRecurringDates(selectedDate, repeatWeekdays, count);
-  }, [repeatCount, repeatWeekdays, selectedDate]);
+    return buildRecurringDates(selectedDate, repeatWeekdays,
+      repeatLimit === 'weeks' ? Number(repeatWeeks) : null, repeatUntil);
+  }, [repeatLimit, repeatUntil, repeatWeeks, repeatWeekdays, selectedDate]);
 
   const scheduleMarkedDates = useMemo(() => {
     if (scheduleMode === "repeat" && !isEditMode) {
@@ -904,10 +909,10 @@ function ClassDetailScreen() {
 
   const handleAddSchedule = async () => {
     if (!selectedDate) { showAlert("알림", "날짜를 선택해주세요."); return; }
-    if (!scheduleSession) { showAlert("알림", "차시를 입력해주세요."); return; }
+    if (!isSupabaseDataSource && !scheduleSession) { showAlert("알림", "차시를 입력해주세요."); return; }
 
-    const firstSession = Number(scheduleSession);
-    if (!Number.isInteger(firstSession) || firstSession < 1) {
+    const firstSession = Number(scheduleSession) || 1;
+    if (!isSupabaseDataSource && (!Number.isInteger(firstSession) || firstSession < 1)) {
       showAlert("입력 확인", "차시는 1 이상의 숫자로 입력해주세요.");
       return;
     }
@@ -917,8 +922,8 @@ function ClassDetailScreen() {
       showAlert("입력 확인", "반복할 요일을 하나 이상 선택해주세요.");
       return;
     }
-    if (isBulkAdd && recurringDates.length === 0) {
-      showAlert("입력 확인", "등록 횟수는 1~60 사이로 입력해주세요.");
+    if (isBulkAdd && (recurringDates.length === 0 || recurringDates.length > 60)) {
+      showAlert("입력 확인", "반복 범위에서 1~60개 일정이 생성되도록 주 수나 종료일을 조정해 주세요.");
       return;
     }
 
@@ -934,7 +939,7 @@ function ClassDetailScreen() {
       note: scheduleNote
     }));
 
-    if (!isEditMode) {
+    if (!isEditMode && !isSupabaseDataSource) {
       const existingSessions = new Set(scheduleRows.map(item => String(item[SCHEDULE_HEADERS.SESSION] ?? "").trim()));
       const conflicts = generatedRows.filter(item => existingSessions.has(item.session)).map(item => item.session);
       if (conflicts.length > 0) {
@@ -959,7 +964,6 @@ function ClassDetailScreen() {
           );
         } else {
           count = await addSupabaseClassSessions(targetId, generatedRows.map((item) => ({
-            sessionNumber: Number(item.session),
             sessionDate: item.date,
             notes: item.note,
             staffIds: scheduleStaffIds,
@@ -1047,7 +1051,9 @@ function ClassDetailScreen() {
     setScheduleStaffIds([]);
     setScheduleNote("");
     setScheduleMode("single");
-    setRepeatCount("8");
+    setRepeatLimit("weeks");
+    setRepeatWeeks("8");
+    setRepeatUntil("");
     setRepeatWeekdays([]);
   };
 
@@ -1061,8 +1067,12 @@ function ClassDetailScreen() {
     setScheduleWorkers(String(row[CLASSES_HEADERS.WORKERS] ?? ""));
     setScheduleStaffIds(Array.isArray(row.__staffIds) ? row.__staffIds : []);
     setScheduleNote("");
-    setRepeatCount("8");
-    setRepeatWeekdays(weekdaysFromText(String(row[CLASSES_HEADERS.DAY] ?? "")));
+    setRepeatLimit("weeks");
+    setRepeatWeeks("8");
+    setRepeatUntil("");
+    setRepeatWeekdays(isSupabaseDataSource && Array.isArray(row.__weekdaySchedule)
+      ? row.__weekdaySchedule.map((entry: any) => Number(entry.weekday))
+      : weekdaysFromText(String(row[CLASSES_HEADERS.DAY] ?? "")));
     setScheduleModalVisible(true);
   };
 
@@ -1112,12 +1122,14 @@ function ClassDetailScreen() {
         <Text style={styles.title}>{isSupabaseDataSource && row.__classLabel
           ? String(row.__classLabel)
           : `${classTitle} ${String(row[CLASSES_HEADERS.DAY] ?? "")}`}</Text>
-        <Text style={styles.meta}>{String(row[CLASSES_HEADERS.SCHOOL] ?? "")} · {String(row[CLASSES_HEADERS.QUARTER] ?? "")}</Text>
+        <Text style={styles.meta}>{row.__classKind === 'clinic' ? '클리닉' : String(row[CLASSES_HEADERS.SCHOOL] ?? "")} · {String(row[CLASSES_HEADERS.QUARTER] ?? "")}</Text>
 
         {isSupabaseDataSource && (
           <View style={styles.sourceBanner}>
             <Text style={styles.sourceBannerTitle}>Supabase 개발 데이터</Text>
-            <Text style={styles.sourceBannerText}>학생 정보는 이 수업 화면에서 관리합니다. 차시를 누르면 기존 기록을 확인하고 표 형태로 한 번에 입력할 수 있습니다.</Text>
+            <Text style={styles.sourceBannerText}>{row.__classKind === 'clinic'
+              ? '각 차시에서 같은 분기의 학생을 참여자로 추가하고 출석·숙제·시험을 기록할 수 있습니다.'
+              : '학생 정보는 이 수업 화면에서 관리합니다. 차시를 누르면 기존 기록을 확인하고 표 형태로 한 번에 입력할 수 있습니다.'}</Text>
           </View>
         )}
 
@@ -1128,7 +1140,9 @@ function ClassDetailScreen() {
             </View>
             <View style={styles.infoItem}>
                 <Text style={styles.label}>시간</Text>
-                <Text style={styles.value}>{String(row[CLASSES_HEADERS.CLASS_START] ?? "")} ~ {String(row[CLASSES_HEADERS.CLASS_END] ?? "")}</Text>
+                <Text style={styles.value}>{isSupabaseDataSource && Array.isArray(row.__weekdaySchedule)
+                  ? row.__weekdaySchedule.slice().sort((a: any, b: any) => Number(a.weekday) - Number(b.weekday)).map((entry: any) => `${WEEKDAY_OPTIONS.find((day) => day.value === Number(entry.weekday))?.label ?? ''} ${entry.day_part} ${entry.start_time && entry.end_time ? `${String(entry.start_time).slice(0, 5)}~${String(entry.end_time).slice(0, 5)}` : '시간 미정'}`).join(' · ')
+                  : `${String(row[CLASSES_HEADERS.CLASS_START] ?? "")} ~ ${String(row[CLASSES_HEADERS.CLASS_END] ?? "")}`}</Text>
             </View>
         </View>
 
@@ -1139,7 +1153,7 @@ function ClassDetailScreen() {
             </View>
         </View>
 
-        {isSupabaseDataSource && (
+        {isSupabaseDataSource && row.__classKind !== 'clinic' && (
           <ClassStudentManager
             classId={targetId}
             defaultJoinedOn={String(scheduleRows[0]?.[SCHEDULE_HEADERS.DATE] ?? todayYmd())}
@@ -1254,7 +1268,9 @@ function ClassDetailScreen() {
           )}
         </View>
 
-        {isSupabaseDataSource && <SupabaseClassWorkPanel classId={targetId} />}
+        {isSupabaseDataSource && <SupabaseClassWorkPanel classId={targetId}
+          classLabel={String(row.__classLabel || classTitle)}
+          defaultHourlyRateKrw={String(row[CLASSES_HEADERS.HOURLY_WAGE] ?? '')} />}
         {isSupabaseDataSource && <SupabaseClassMessagingPanel
           classId={targetId}
           classLabel={String(row.__classLabel || classTitle)}
@@ -1461,20 +1477,25 @@ function ClassDetailScreen() {
                     })}
                   </View>
 
-                  <Text style={styles.label}>등록 횟수</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={repeatCount}
-                    onChangeText={setRepeatCount}
-                    placeholder="예: 8"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="number-pad"
-                    maxLength={2}
-                  />
+                  <Text style={styles.label}>반복 범위</Text>
+                  <View style={styles.scheduleModeControl}>
+                    <Pressable style={[styles.scheduleModeOption, repeatLimit === 'weeks' && styles.scheduleModeOptionActive]} onPress={() => setRepeatLimit('weeks')}>
+                      <Text style={[styles.scheduleModeText, repeatLimit === 'weeks' && styles.scheduleModeTextActive]}>몇 주 동안</Text>
+                    </Pressable>
+                    <Pressable style={[styles.scheduleModeOption, repeatLimit === 'until' && styles.scheduleModeOptionActive]} onPress={() => setRepeatLimit('until')}>
+                      <Text style={[styles.scheduleModeText, repeatLimit === 'until' && styles.scheduleModeTextActive]}>종료일까지</Text>
+                    </Pressable>
+                  </View>
+                  {repeatLimit === 'weeks'
+                    ? <TextInput style={styles.modalInput} value={repeatWeeks} onChangeText={setRepeatWeeks}
+                        placeholder="예: 8주" placeholderTextColor="#9CA3AF" keyboardType="number-pad" maxLength={2} />
+                    : <TextInput style={styles.modalInput} value={repeatUntil} onChangeText={setRepeatUntil}
+                        placeholder="YYYY-MM-DD" placeholderTextColor="#9CA3AF" />}
+                  <Text style={styles.repeatPreviewDates}>시작 기준일 포함 · 최대 60개 일정</Text>
 
                   {recurringDates.length > 0 && (
                     <View style={styles.repeatPreview}>
-                      <Text style={styles.repeatPreviewTitle}>총 {recurringDates.length}회 · {scheduleSession || '?'}차시부터</Text>
+                      <Text style={styles.repeatPreviewTitle}>총 {recurringDates.length}회{isSupabaseDataSource ? ' · 날짜순 차시 자동 지정' : ` · ${scheduleSession || '?'}차시부터`}</Text>
                       <Text style={styles.repeatPreviewDates}>
                         {recurringDates.slice(0, 6).join(' · ')}{recurringDates.length > 6 ? ` 외 ${recurringDates.length - 6}회` : ''}
                       </Text>
@@ -1483,22 +1504,16 @@ function ClassDetailScreen() {
                 </View>
               )}
 
+              {isSupabaseDataSource && <Text style={styles.repeatPreviewDates}>
+                차시는 날짜 오름차순으로 자동 정렬됩니다. 날짜를 수정하거나 일정을 삭제해도 다시 매겨집니다.
+              </Text>}
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                <View style={{ flex: 1 }}>
+                {!isSupabaseDataSource && <View style={{ flex: 1 }}>
                   <Text style={styles.label}>{scheduleMode === 'repeat' && !isEditMode ? '시작 차시' : '차시'}</Text>
-                  <TextInput 
-                    style={[
-                      styles.modalInput, 
-                      isEditMode && { backgroundColor: '#E5E7EB', color: '#6B7280' }
-                    ]}
-                    placeholder="예: 1"
-                    placeholderTextColor="#9CA3AF"
-                    keyboardType="number-pad"
-                    value={scheduleSession}
-                    onChangeText={setScheduleSession}
-                    editable={!isEditMode} // 수정 모드에선 읽기 전용
-                  />
-                </View>
+                  <TextInput style={[styles.modalInput, isEditMode && { backgroundColor: '#E5E7EB', color: '#6B7280' }]}
+                    placeholder="예: 1" placeholderTextColor="#9CA3AF" keyboardType="number-pad"
+                    value={scheduleSession} onChangeText={setScheduleSession} editable={!isEditMode} />
+                </View>}
                 <View style={{ flex: 1.5 }}>
                   <Text style={styles.label}>예정 근무자</Text>
                   {isSupabaseDataSource ? (
