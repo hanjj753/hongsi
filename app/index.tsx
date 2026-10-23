@@ -75,7 +75,11 @@ export default function LoginScreen() {
     try {
       if (Platform.OS === 'web') {
         const provider = new GoogleAuthProvider();
-        if (!isSupabaseDataSource) provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+        if (isSupabaseDataSource) {
+          provider.setCustomParameters({ prompt: 'select_account' });
+        } else {
+          provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+        }
         const result = await signInWithPopup(webAuth, provider);
 
         if (isSupabaseDataSource) {
