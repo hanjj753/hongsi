@@ -1,5 +1,7 @@
 # 개발 DB 적용 및 Firebase 연결 상태
 
+> 운영 현황: `hongsi-eta.vercel.app`은 `hongsi-dev` Supabase 프로젝트를 실제 데이터베이스로 사용한다. 화면의 개발 모드 문구는 제거했다. 이 프로젝트에 입력하는 내용은 운영 데이터다.
+
 작성: 2026-09-13 · 갱신: 2026-10-11 · 브랜치 `codex/migrate-to-supabase`
 
 ## 적용 완료
@@ -67,7 +69,7 @@ Firebase 관리용 서비스 계정 JSON이 로컬에 준비되어 있어야 한
 
 기존 `client_secret_…apps.googleusercontent.com.json`은 `web` 형식의 OAuth 클라이언트 설정으로, 서비스 계정 키가 아니므로 이 도구에 사용할 수 없다. 이 기존 파일은 Git 추적 대상이며 이번 작업에서 수정하지 않았다.
 
-현재 서비스 계정 파일은 알려준 경로에서 더 이상 확인되지 않는다. 앱 실행에는 필요하지 않으며, 이후 다른 Firebase 사용자에게 로그인 claim을 설정할 때만 다시 준비하면 된다.
+운영 자동 연결에는 Vercel의 비공개 서버 환경변수만 사용한다. 로컬 서비스 계정 파일은 수동 복구 도구에만 필요하며 Git 추적 대상이 아니다.
 
 사용자가 콘솔에서 직접 진행할 순서:
 
@@ -86,7 +88,7 @@ node provision-firebase.mjs --email 'hongsi20222@gmail.com'
 node provision-firebase.mjs --email 'hongsi20222@gmail.com' --apply
 ```
 
-적용 뒤에는 검증된 UID·이메일·표시 이름·프로젝트 ID만 `supabase/.local/firebase-user.json`에 보관한다. 관리자 도구를 실행했다고 DB의 관리자 권한이나 승인 상태가 자동 생성되지는 않는다. 이번 첫 관리자 DB 등록은 별도 SQL로 완료했다. 신규 조교도 계정을 연결할 때 로그인 claim 설정이 필요하다. 조교 정보의 이메일과 검증된 Firebase 이메일이 같으면 재로그인 시 DB 계정이 자동 연결되며, 관리자가 앱의 조교 탭에서 승인한다.
+수동 도구를 적용하면 검증된 UID·이메일·표시 이름·프로젝트 ID만 `supabase/.local/firebase-user.json`에 보관한다. 이 도구를 실행해도 DB의 관리자 권한이나 승인 상태가 자동 생성되지는 않는다. 첫 관리자 DB 등록은 별도 SQL로 완료했다. 신규 조교의 로그인 claim은 운영 서버가 자동 설정하며, 검증된 Firebase 이메일과 사전 등록 이메일이 같을 때만 DB 계정이 연결된다.
 
 `supabase/tools/verify-firebase-access.mjs`는 기존의 인증된 관리자만 대상으로 custom-token 로그인을 수행하고 개발 DB를 읽는다. DB 쓰기나 역할 변경은 하지 않으며 ID 토큰과 refresh token은 프로세스 메모리에서만 사용한다. 로그인으로 Firebase의 마지막 로그인 시각은 갱신될 수 있다. Google 로그인 UI 검증을 대신하지 않는다.
 
@@ -98,12 +100,12 @@ node --env-file=.env.local supabase/tools/verify-firebase-access.mjs --email 'ho
 
 ## 앱 연결 코드
 
-- `lib/supabase.ts`: 공식 Supabase 클라이언트. Firebase ID 토큰을 요청별로 전달하고, Supabase 자체 로그인 세션을 중복 관리하지 않는다. claim이 없으면 한 번 강제 갱신 후 안내 오류를 반환한다. 토큰 확인·갱신에는 각각 10초, DB 네트워크 요청에는 15초 제한이 있고 쓰기를 자동 재시도하지 않는다.
+- `lib/supabase.ts`: 공식 Supabase 클라이언트. Firebase ID 토큰을 요청별로 전달하고, Supabase 자체 로그인 세션을 중복 관리하지 않는다. 로그인 claim이 없으면 운영 서버에 검증된 토큰으로 자동 설정을 요청한 뒤 새 토큰을 받는다. 토큰 확인·갱신에는 각각 10초, DB 네트워크 요청에는 15초 제한이 있고 쓰기를 자동 재시도하지 않는다.
 - `utils/appAccess.ts`: 본인 접근 상태 조회와 관리자 전용 계정 승인 RPC 호출. Firebase UID/승인 여부는 DB가 결정한다.
 - `contexts/AppAccessContext.tsx`와 `components/AppAccessGate.tsx`: 개발 DB 모드에서 로그인 직후 승인 상태와 역할을 확인한다. 미등록·승인 대기·중지·비활성 계정은 업무 화면 대신 상태 안내를 본다.
 - `lib/classData.ts`: 수업 목록, 위치, 수업 상세·차시·수강생·차시 기록을 개발 DB에서 조회한다. 장소와 학생 정보, 숙제·시험 항목도 DB에 저장한다.
-- `EXPO_PUBLIC_DATA_SOURCE=supabase`인 로컬 개발 환경에서 위 연결을 사용한다. 값이 없거나 `sheets`이면 기존 Sheets 화면 흐름을 사용하므로 Vercel 운영 사이트는 환경변수를 바꾸기 전까지 영향을 받지 않는다.
-- 개발 DB의 웹 로그인은 Google Drive 범위를 요청하거나 Sheets용 Google 액세스 토큰을 기다리지 않는다. 승인된 계정으로 진입한 홈 화면도 기존 조교·권한·출퇴근 시트를 읽지 않고 즉시 개발 모드 안내를 표시한다. 운영 Sheets 모드의 기존 Google Drive 로그인과 홈 화면은 유지한다.
+- 운영 사이트는 `EXPO_PUBLIC_DATA_SOURCE=supabase`를 사용한다. 로컬에서 값이 없거나 `sheets`이면 기존 Sheets 화면 흐름을 사용한다.
+- Supabase 웹 로그인은 Google Drive 범위를 요청하거나 Sheets용 Google 액세스 토큰을 기다리지 않는다. 승인된 계정으로 진입한 홈 화면은 기존 조교·권한·출퇴근 시트를 읽지 않고 DB의 근무 현황을 표시한다.
 - 수업 상세에서 수강 학생을 등록·수정한다. 학생 ID를 비우면 `S`와 임의 영문·숫자로 자동 생성하며, 한국 휴대전화 번호와 이메일 형식을 앱과 DB 양쪽에서 검사한다.
 - 학생 ID는 분기와 무관하게 계속 유지된다. 수강 관계는 `수강 중/전반/퇴원`으로 관리하고, 같은 분기 전반 시 이전 반의 종료일과 새 반의 시작일을 한 트랜잭션으로 저장한다. 이전 차시 기록은 원래 반에 남는다.
 - 다른 반에 한두 번 보강 오는 학생은 정식 수강생으로 중복 등록하지 않는다. B 차시의 **다른 반 보강 학생**에서 원래 A 차시를 선택하면, A에는 다른 반 보강 상태가 자동 생성되고 B에서 출석·숙제·시험을 입력할 수 있다. A/B의 날짜 순서는 제한하지 않으며 **전체 학생 기록**에서 양쪽 연결을 확인한다.
@@ -135,10 +137,12 @@ node --env-file=.env.local supabase/tools/verify-firebase-access.mjs --email 'ho
 
 ## 새 조교 계정 연결
 
-1. 개발 DB 모드의 조교 탭에서 이름과 로그인에 사용할 이메일을 등록한다. 이 단계는 앱 권한을 승인하지 않는다.
-2. 해당 조교가 같은 이메일로 Firebase Google 로그인을 한 뒤, 관리자 로컬 도구로 Supabase 로그인 claim을 설정한다. 서비스 계정 JSON은 Git에 넣지 않는다.
-3. 조교가 재로그인하면 검증된 Firebase 이메일과 DB의 사전 등록 이메일이 일치할 때 계정이 연결되고 승인 대기 상태가 된다.
-4. 관리자가 조교 탭의 앱 권한에서 역할과 승인 상태를 저장한다. 계좌번호와 재직 상태는 관리자만 수정한다.
+1. 조교 탭에서 이름과 로그인에 사용할 이메일을 등록한다. 이 단계는 앱 권한을 승인하지 않는다.
+2. 해당 조교가 같은 Google 이메일로 운영 사이트에 처음 로그인한다. `api/firebase-login.js`는 서명·프로젝트·이메일 인증을 확인하고 Supabase 로그인용 Firebase `role=authenticated` claim만 자동으로 설정한다. 서버 비밀 키는 `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` 환경변수에만 둔다. 앱 역할이나 승인 상태는 설정하지 않는다.
+3. 앱은 새 ID 토큰을 받아 사전 등록된 조교 이메일과 DB 계정을 연결한다. 일치하는 직원이 없으면 앱 접근은 거부되고, 일치하면 승인 대기 상태가 된다.
+4. 관리자가 조교 탭을 새로고침하고 앱 권한에서 역할과 승인 상태를 저장한다. 관리자의 최종 승인은 계속 필요하다.
+
+서버 환경변수가 없는 로컬 개발 환경이나 Preview에서는 신규 계정의 자동 연결을 사용할 수 없다. 운영용 서비스 계정 JSON을 Git이나 `EXPO_PUBLIC_` 변수에 넣지 않는다. 계정별 로컬 도구 `supabase/tools/provision-firebase.mjs`는 서버 장애 때만 수동 복구 용도로 사용한다.
 
 ## 검증
 

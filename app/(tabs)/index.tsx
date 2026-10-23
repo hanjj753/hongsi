@@ -458,9 +458,9 @@ export default function HomeScreen() {
 
             {isSupabaseDataSource ? (
               <View style={styles.developmentNotice}>
-                <Text style={styles.developmentNoticeTitle}>Supabase 개발 모드</Text>
+                <Text style={styles.developmentNoticeTitle}>근무 현황</Text>
                 <Text style={styles.developmentNoticeText}>
-                  로그인과 계정 권한 확인이 완료되었습니다. 입력한 수업과 차시는 아래 수업 탭에서 확인할 수 있습니다.
+                  수업과 차시는 수업 탭에서 확인할 수 있습니다.
                 </Text>
                 <SupabaseHomeWorkSummary />
               </View>

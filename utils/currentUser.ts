@@ -32,7 +32,7 @@ export async function getCurrentUserIdToken(forceRefresh = false): Promise<strin
     : null;
 }
 
-/** Firebase custom claims are managed by the trusted provisioning script. */
+/** Firebase custom claims are managed by the trusted login server. */
 export async function getCurrentUserTokenResult(forceRefresh = false) {
   const user = Platform.OS === 'web' ? webAuth.currentUser : auth().currentUser;
   return user ? user.getIdTokenResult(forceRefresh) : null;

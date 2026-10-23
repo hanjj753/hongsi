@@ -339,13 +339,6 @@ export default function ClassScreen() {
           </View>
         </View>
 
-        {isSupabaseDataSource && (
-          <View style={styles.sourceBanner}>
-            <Text style={styles.sourceBannerTitle}>Supabase 개발 데이터</Text>
-            <Text style={styles.sourceBannerText}>이 화면의 수업과 위치는 개발 DB에서 불러옵니다.</Text>
-          </View>
-        )}
-
         {!!loadError && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>{loadError}</Text>
@@ -521,9 +514,6 @@ const styles = StyleSheet.create({
   headerRow: { width: "92%", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
   headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
   title: { fontSize: 20, fontWeight: "800", color: "#111827" },
-  sourceBanner: { width: '92%', backgroundColor: '#EEF2FF', borderColor: '#C7D2FE', borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 },
-  sourceBannerTitle: { color: '#3730A3', fontWeight: '800', marginBottom: 3 },
-  sourceBannerText: { color: '#4F46E5', fontSize: 12 },
   errorBox: { width: '92%', backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
   errorText: { color: '#991B1B', marginBottom: 8 },
   retryText: { color: '#4F46E5', fontWeight: '800' },

@@ -1126,7 +1126,7 @@ function ClassDetailScreen() {
 
         {isSupabaseDataSource && (
           <View style={styles.sourceBanner}>
-            <Text style={styles.sourceBannerTitle}>Supabase 개발 데이터</Text>
+            <Text style={styles.sourceBannerTitle}>수업 기록 안내</Text>
             <Text style={styles.sourceBannerText}>{row.__classKind === 'clinic'
               ? '각 차시에서 같은 분기의 학생을 참여자로 추가하고 출석·숙제·시험을 기록할 수 있습니다.'
               : '학생 정보는 이 수업 화면에서 관리합니다. 차시를 누르면 기존 기록을 확인하고 표 형태로 한 번에 입력할 수 있습니다.'}</Text>

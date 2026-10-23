@@ -274,10 +274,10 @@ export default function SupabaseAssistantScreen() {
     <Modal visible={Boolean(accessTarget)} transparent animationType="fade" onRequestClose={() => setAccessTarget(null)}>
       <View style={styles.overlay}><View style={styles.smallModal}><Text style={styles.modalTitle}>{accessTarget?.fullName} 앱 권한</Text>
         {!!error && <Text style={styles.error}>{error}</Text>}
-        {!accessTarget?.linked && <Text style={styles.muted}>Firebase 계정 연결을 완료한 뒤 승인할 수 있습니다.</Text>}
+        {!accessTarget?.linked && <Text style={styles.muted}>해당 조교가 위 이메일로 한 번 로그인하면 계정이 자동 연결됩니다. 연결 후 이 화면을 새로고침해 승인해 주세요.</Text>}
         <Text style={styles.label}>역할</Text><View style={styles.pickerBox}><Picker selectedValue={roleDraft} onValueChange={(value) => setRoleDraft(value as AppRole)}><Picker.Item label="조교" value="assistant" /><Picker.Item label="매니저" value="manager" /><Picker.Item label="관리자" value="admin" /></Picker></View>
         <Text style={styles.label}>상태</Text><View style={styles.pickerBox}><Picker selectedValue={statusDraft} onValueChange={(value) => setStatusDraft(value as AccessStatus)}><Picker.Item label="승인 대기" value="pending" /><Picker.Item label="승인" value="approved" /><Picker.Item label="중지" value="suspended" /></Picker></View>
-        <View style={styles.actions}><Button label="취소" onPress={() => setAccessTarget(null)} /><Button label="저장" primary disabled={busy || !accessTarget?.linked} onPress={() => void saveAccess()} /></View>
+        <View style={styles.actions}><Button label="취소" onPress={() => setAccessTarget(null)} /><Button label={accessTarget?.linked ? '저장' : '첫 로그인 후 저장 가능'} primary disabled={busy || !accessTarget?.linked} onPress={() => void saveAccess()} /></View>
       </View></View>
     </Modal>
 

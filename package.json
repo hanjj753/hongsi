@@ -34,6 +34,7 @@
     "expo-sharing": "~13.0.1",
     "expo-status-bar": "~2.0.1",
     "firebase": "^12.7.0",
+    "firebase-admin": "^14.4.0",
     "papaparse": "^5.5.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",

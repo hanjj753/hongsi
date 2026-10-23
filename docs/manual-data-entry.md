@@ -1,6 +1,6 @@
 # Supabase 초기 데이터 입력 순서
 
-현재 개발 앱은 `EXPO_PUBLIC_DATA_SOURCE=supabase`일 때 `hongsi-dev`를 사용한다. 운영 Vercel 환경은 이 값을 설정하기 전까지 기존 Google Sheets를 계속 사용한다.
+운영 사이트 `hongsi-eta.vercel.app`은 현재 Supabase 프로젝트 `hongsi-dev`를 데이터베이스로 사용한다. 프로젝트 이름은 개발 단계에서 붙인 것이며, 운영 사이트의 입력과 수정은 이 DB에 실제로 저장된다.
 
 분기·수업·차시·학생·성적은 이제 Supabase Table Editor를 열지 않고 앱에서 입력한다. `id`, 관계 ID, 숫자 요일 배열을 직접 다룰 필요가 없다.
 
