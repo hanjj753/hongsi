@@ -319,7 +319,7 @@ export default function ClassScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <ScrollView contentContainerStyle={[styles.container, compact && styles.containerCompact]} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* 헤더 영역 */}
         <View style={[styles.headerRow, compact && styles.headerRowCompact]}>
@@ -512,6 +512,7 @@ export default function ClassScreen() {
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, paddingTop: 20, alignItems: "center", paddingBottom: 24, backgroundColor: "#F6F7FB" },
+  containerCompact: { paddingHorizontal: 16 },
 
   headerRow: { width: "92%", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
   headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },

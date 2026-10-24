@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '../../components/ReadablePicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,11 +13,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
 import { AppAccessGate } from '../../components/AppAccessGate';
-import TestQuestionSheet from '../../components/TestQuestionSheet';
+import TestQuestionSheet, { type QuestionSheetHandle } from '../../components/TestQuestionSheet';
 import { useAppAccess } from '../../contexts/AppAccessContext';
 import {
   addSupabaseMakeupParticipant,
@@ -149,6 +151,9 @@ function buildDrafts(workspace: SessionWorkspace): Record<string, StudentDraftSt
 
 function SessionWorkspaceScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const { width } = useWindowDimensions();
+  const compact = width < 720;
   const { access } = useAppAccess();
   const canManage = access?.app_role === 'manager' || access?.app_role === 'admin';
   const params = useLocalSearchParams<{ id?: string | string[]; classId?: string | string[]; title?: string | string[] }>();
@@ -165,6 +170,11 @@ function SessionWorkspaceScreen() {
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [busyKey, setBusyKey] = useState('');
+  const [questionSheetDirty, setQuestionSheetDirty] = useState(false);
+  const questionSheetRef = useRef<QuestionSheetHandle>(null);
+  const [leavePromptVisible, setLeavePromptVisible] = useState(false);
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<Parameters<typeof navigation.dispatch>[0] | null>(null);
+  const [approvedLeaveAction, setApprovedLeaveAction] = useState<Parameters<typeof navigation.dispatch>[0] | null>(null);
   const [homeworkTitle, setHomeworkTitle] = useState('');
   const [testTitle, setTestTitle] = useState('');
   const [testResultType, setTestResultType] = useState<'score' | 'memo'>('score');
@@ -252,6 +262,25 @@ function SessionWorkspaceScreen() {
     JSON.stringify(drafts[student.id]) !== JSON.stringify(savedDrafts[student.id])) ?? [],
   [drafts, savedDrafts, workspace]);
   const hasDraftChanges = changedStudents.length > 0;
+  const editingHomework = workspace?.homeworks.find((item) => item.id === homeworkEditId);
+  const editingTest = workspace?.tests.find((item) => item.id === testEditId);
+  const hasPendingHomework = Boolean(homeworkEditId
+    ? editingHomework && homeworkTitle.trim() !== editingHomework.title
+    : homeworkTitle.trim());
+  const hasPendingTest = Boolean(testEditId
+    ? editingTest && (testTitle.trim() !== editingTest.title || testResultType !== editingTest.resultType
+      || (testResultType === 'score' && Number(testMaxScore) !== editingTest.maxScore))
+    : testTitle.trim() || testMaxScore.trim());
+  const hasUnsavedChanges = hasDraftChanges || questionSheetDirty || hasPendingHomework || hasPendingTest;
+
+  usePreventRemove(hasUnsavedChanges && !approvedLeaveAction, ({ data }) => {
+    setPendingLeaveAction(data.action);
+    setLeavePromptVisible(true);
+  });
+
+  useEffect(() => {
+    if (approvedLeaveAction) navigation.dispatch(approvedLeaveAction);
+  }, [approvedLeaveAction, navigation]);
 
   const updateDraft = useCallback((studentId: string, updater: (draft: StudentDraftState) => StudentDraftState) => {
     setNotice('');
@@ -339,8 +368,8 @@ function SessionWorkspaceScreen() {
     };
   };
 
-  const saveAll = async () => {
-    if (!workspace || workspace.students.length === 0 || !hasDraftChanges || busyKey || refreshing) return;
+  const saveAll = async (): Promise<boolean> => {
+    if (!workspace || workspace.students.length === 0 || !hasDraftChanges || busyKey || refreshing) return false;
     setActionError('');
     setNotice('');
     let payloads: Array<{ studentId: string; draft: StudentSessionDraft }>;
@@ -352,24 +381,36 @@ function SessionWorkspaceScreen() {
       });
     } catch (error) {
       setActionError(errorText(error));
-      return;
+      return false;
     }
     setBusyKey('save-all');
     try {
       await saveSupabaseSessionRosterDraft(classId, sessionId, payloads);
       await load(false);
       setNotice(`${payloads.length}명의 변경된 기록을 저장했습니다.`);
+      return true;
     } catch (error) {
       setActionError(errorText(error));
+      return false;
     } finally {
       setBusyKey('');
     }
   };
 
-  const addHomework = async () => {
+  const saveAndLeave = async () => {
+    if (!pendingLeaveAction || busyKey || refreshing) return;
+    setLeavePromptVisible(false);
+    if (hasDraftChanges && !(await saveAll())) return;
+    if (hasPendingHomework && !(await addHomework())) return;
+    if (hasPendingTest && !(await addTest())) return;
+    if (questionSheetDirty && !(await questionSheetRef.current?.save())) return;
+    setApprovedLeaveAction(pendingLeaveAction);
+  };
+
+  const addHomework = async (): Promise<boolean> => {
     if (!workspace || !homeworkTitle.trim()) {
       setActionError('숙제 이름을 입력해 주세요.');
-      return;
+      return false;
     }
     setBusyKey('add-homework');
     setActionError('');
@@ -385,22 +426,24 @@ function SessionWorkspaceScreen() {
       setHomeworkEditId('');
       await load(false);
       setNotice(editing ? '숙제 항목을 수정했습니다.' : '숙제 항목을 추가했습니다.');
+      return true;
     } catch (error) {
       setActionError(errorText(error));
+      return false;
     } finally {
       setBusyKey('');
     }
   };
 
-  const addTest = async () => {
+  const addTest = async (): Promise<boolean> => {
     if (!workspace || !testTitle.trim()) {
       setActionError('시험 이름을 입력해 주세요.');
-      return;
+      return false;
     }
     const normalized = testMaxScore.trim();
     if (testResultType === 'score' && (!/^\d+(?:\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0)) {
       setActionError('시험 만점은 0보다 큰 숫자로 소수점 둘째 자리까지 입력해 주세요.');
-      return;
+      return false;
     }
     setBusyKey('add-test');
     setActionError('');
@@ -419,8 +462,10 @@ function SessionWorkspaceScreen() {
       setTestEditId('');
       await load(false);
       setNotice(editing ? '시험 항목을 수정했습니다.' : '시험 항목을 추가했습니다.');
+      return true;
     } catch (error) {
       setActionError(errorText(error));
+      return false;
     } finally {
       setBusyKey('');
     }
@@ -562,11 +607,11 @@ function SessionWorkspaceScreen() {
         <View style={styles.setupCard}>
           <Text style={styles.sectionTitle}>차시 항목 구성</Text>
           <Text style={styles.sectionDescription}>숙제와 시험을 추가하거나 이름·시험 형식·만점을 수정할 수 있습니다.</Text>
-          <View style={styles.setupForms}>
-            <View style={styles.setupGroup}>
+          <View style={[styles.setupForms, compact && styles.setupFormsCompact]}>
+            <View style={[styles.setupGroup, compact && styles.setupGroupCompact]}>
               <Text style={styles.setupLabel}>{homeworkEditId ? '숙제 수정' : '숙제 추가'}</Text>
-              <View style={styles.inlineForm}>
-                <TextInput value={homeworkTitle} onChangeText={setHomeworkTitle} style={[styles.input, styles.growInput]} placeholder="예: 교재 숙제" placeholderTextColor="#9CA3AF" editable={!busyKey} />
+              <View style={[styles.inlineForm, compact && styles.inlineFormCompact]}>
+                <TextInput value={homeworkTitle} onChangeText={setHomeworkTitle} style={[styles.input, styles.growInput, compact && styles.growInputCompact]} placeholder="예: 교재 숙제" placeholderTextColor="#9CA3AF" editable={!busyKey} />
                 {!!homeworkEditId && <Pressable disabled={Boolean(busyKey)} style={styles.cancelEditButton} onPress={() => { setHomeworkEditId(''); setHomeworkTitle(''); }}><Text style={styles.cancelEditText}>취소</Text></Pressable>}
                 <Pressable disabled={Boolean(busyKey)} style={[styles.compactButton, Boolean(busyKey) && styles.disabled]} onPress={() => void addHomework()}>
                   {busyKey === 'add-homework' ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.compactButtonText}>{homeworkEditId ? '저장' : '추가'}</Text>}
@@ -580,15 +625,15 @@ function SessionWorkspaceScreen() {
                 </View>
               ))}</View>
             </View>
-            <View style={styles.setupGroup}>
+            <View style={[styles.setupGroup, compact && styles.setupGroupCompact]}>
               <Text style={styles.setupLabel}>{testEditId ? '시험 수정' : '시험 추가'}</Text>
               <View style={styles.resultTypeOptions}>
                 <Pressable disabled={Boolean(busyKey) || editingTestHasResults} style={[styles.resultTypeOption, testResultType === 'score' && styles.resultTypeOptionActive]} onPress={() => setTestResultType('score')}><Text style={[styles.resultTypeText, testResultType === 'score' && styles.resultTypeTextActive]}>점수형</Text></Pressable>
                 <Pressable disabled={Boolean(busyKey) || editingTestHasResults} style={[styles.resultTypeOption, testResultType === 'memo' && styles.resultTypeOptionActive]} onPress={() => { setTestResultType('memo'); setTestMaxScore(''); }}><Text style={[styles.resultTypeText, testResultType === 'memo' && styles.resultTypeTextActive]}>결과 메모형</Text></Pressable>
               </View>
               {editingTestHasResults && <Text style={styles.sectionDescription}>학생 결과가 입력된 시험은 형식을 변경할 수 없습니다.</Text>}
-              <View style={styles.inlineForm}>
-                <TextInput value={testTitle} onChangeText={setTestTitle} style={[styles.input, styles.growInput]} placeholder="예: 단원 평가" placeholderTextColor="#9CA3AF" editable={!busyKey} />
+              <View style={[styles.inlineForm, compact && styles.inlineFormCompact]}>
+                <TextInput value={testTitle} onChangeText={setTestTitle} style={[styles.input, styles.growInput, compact && styles.growInputCompact]} placeholder="예: 단원 평가" placeholderTextColor="#9CA3AF" editable={!busyKey} />
                 {testResultType === 'score' && <TextInput value={testMaxScore} onChangeText={setTestMaxScore} style={[styles.input, styles.maxInput]} placeholder="만점" placeholderTextColor="#9CA3AF" keyboardType="decimal-pad" editable={!busyKey} />}
                 {!!testEditId && <Pressable disabled={Boolean(busyKey)} style={styles.cancelEditButton} onPress={() => { setTestEditId(''); setTestTitle(''); setTestResultType('score'); setTestMaxScore(''); }}><Text style={styles.cancelEditText}>취소</Text></Pressable>}
                 <Pressable disabled={Boolean(busyKey)} style={[styles.compactButton, Boolean(busyKey) && styles.disabled]} onPress={() => void addTest()}>
@@ -748,9 +793,21 @@ function SessionWorkspaceScreen() {
             {busyKey === 'save-all' ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.bottomSaveText}>전체 저장</Text>}
           </Pressable>
         )}
-        <TestQuestionSheet classId={classId} sessionId={sessionId} sessionDate={workspace.sessionDate}
+        <TestQuestionSheet ref={questionSheetRef} onDirtyChange={setQuestionSheetDirty} classId={classId} sessionId={sessionId} sessionDate={workspace.sessionDate}
           classLabel={routeTitle || '수업'} tests={workspace.tests} students={workspace.students} />
       </ScrollView>
+
+      <Modal visible={leavePromptVisible} transparent animationType="fade" onRequestClose={() => setLeavePromptVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.leaveCard}>
+            <Text style={styles.modalTitle}>저장하지 않은 변경사항</Text>
+            <Text style={styles.leaveMessage}>변경한 차시 기록이 있습니다. 저장하고 나가시겠어요?</Text>
+            <Pressable style={styles.leaveSaveButton} disabled={Boolean(busyKey) || refreshing} onPress={() => void saveAndLeave()}><Text style={styles.modalSaveText}>저장하고 나가기</Text></Pressable>
+            <Pressable style={styles.leaveDiscardButton} onPress={() => { setLeavePromptVisible(false); setApprovedLeaveAction(pendingLeaveAction); }}><Text style={styles.leaveDiscardText}>저장하지 않고 나가기</Text></Pressable>
+            <Pressable style={styles.leaveCancelButton} onPress={() => setLeavePromptVisible(false)}><Text style={styles.modalCancelText}>계속 편집</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={makeupModalVisible} transparent animationType="fade" onRequestClose={() => setMakeupModalVisible(false)}>
         <View style={styles.modalOverlay}>
@@ -832,6 +889,8 @@ const styles = StyleSheet.create({
   sectionDescription: { marginTop: 4, color: '#6B7280', fontSize: 13 },
   setupForms: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, marginTop: 14 },
   setupGroup: { flexGrow: 1, flexBasis: 360 },
+  setupFormsCompact: { flexDirection: 'column' },
+  setupGroupCompact: { width: '100%', flexGrow: 0, flexBasis: 'auto' },
   setupLabel: { marginBottom: 7, color: '#374151', fontWeight: '800' },
   resultTypeOptions: { flexDirection: 'row', gap: 8, marginBottom: 9 },
   resultTypeOption: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB' },
@@ -839,8 +898,10 @@ const styles = StyleSheet.create({
   resultTypeText: { color: '#4B5563', fontSize: 12, fontWeight: '700' },
   resultTypeTextActive: { color: '#4338CA' },
   inlineForm: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  inlineFormCompact: { flexWrap: 'wrap' },
   input: { height: 42, paddingHorizontal: 11, borderRadius: 9, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#FFFFFF', color: '#111827' },
   growInput: { flex: 1, minWidth: 130 },
+  growInputCompact: { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: '100%', minWidth: 0 },
   maxInput: { width: 90 },
   compactButton: { minWidth: 62, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: '#4F46E5' },
   compactButtonText: { color: '#FFFFFF', fontWeight: '800' },
@@ -906,5 +967,11 @@ const styles = StyleSheet.create({
   modalCancelText: { color: '#374151', fontWeight: '800' },
   modalSave: { minWidth: 120, alignItems: 'center', paddingHorizontal: 18, paddingVertical: 11, borderRadius: 9, backgroundColor: '#4F46E5' },
   modalSaveText: { color: '#FFFFFF', fontWeight: '800' },
+  leaveCard: { width: '100%', maxWidth: 420, padding: 20, borderRadius: 16, backgroundColor: '#FFFFFF' },
+  leaveMessage: { marginTop: 10, marginBottom: 18, color: '#4B5563', lineHeight: 21 },
+  leaveSaveButton: { alignItems: 'center', padding: 13, borderRadius: 9, backgroundColor: '#4F46E5' },
+  leaveDiscardButton: { alignItems: 'center', padding: 12, marginTop: 8, borderRadius: 9, borderWidth: 1, borderColor: '#E5E7EB' },
+  leaveDiscardText: { color: '#DC2626', fontWeight: '800' },
+  leaveCancelButton: { alignItems: 'center', padding: 12, marginTop: 8 },
   disabled: { opacity: 0.5 },
 });

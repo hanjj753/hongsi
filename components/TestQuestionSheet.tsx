@@ -13,7 +13,10 @@ type Props = {
   classLabel: string;
   tests: SessionTest[];
   students: ClassStudent[];
+  onDirtyChange?: (dirty: boolean) => void;
 };
+
+export type QuestionSheetHandle = { save: () => Promise<boolean> };
 
 const numbersText = (numbers: number[], objectiveCount: number) =>
   numbers.map((number) => questionLabel(number, objectiveCount)).join(', ');
@@ -24,7 +27,7 @@ function sheetSnapshot(objectiveCount: number, essayCount: number, rows: Record<
     .map(([studentId, numbers]) => [studentId, [...numbers].sort((left, right) => left - right)]) });
 }
 
-export default function TestQuestionSheet({ classId, sessionId, sessionDate, classLabel, tests, students }: Props) {
+const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function TestQuestionSheet({ classId, sessionId, sessionDate, classLabel, tests, students, onDirtyChange }, ref) {
   const [testId, setTestId] = useState('');
   const [objectiveText, setObjectiveText] = useState('');
   const [essayText, setEssayText] = useState('');
@@ -33,6 +36,7 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
   const [pendingInputs, setPendingInputs] = useState<Record<string, boolean>>({});
   const [savedObjectiveCount, setSavedObjectiveCount] = useState<number | null>(null);
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState('');
   const [loadedTestId, setLoadedTestId] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -52,6 +56,10 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
   const hasChanges = countsValid && loadedTestId === testId
     && (savedSnapshot === null || savedSnapshot !== sheetSnapshot(objectiveCount, essayCount, rosterRows));
   const saveDisabled = busy || loading || !hasChanges;
+  const formSnapshot = JSON.stringify({ objectiveText, essayText, wrongByStudent: rosterRows, numberInputs });
+  const isDirty = loadedTestId === testId && savedFormSnapshot !== '' && formSnapshot !== savedFormSnapshot;
+
+  useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
 
   useEffect(() => {
     if (!tests.some((item) => item.id === testId)) setTestId(tests[0]?.id ?? '');
@@ -61,7 +69,7 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
     let active = true;
     setError(''); setNotice('');
     setObjectiveText(''); setEssayText(''); setWrongByStudent({}); setNumberInputs({}); setPendingInputs({}); setSavedObjectiveCount(null);
-    setSavedSnapshot(null); setLoadedTestId('');
+    setSavedSnapshot(null); setSavedFormSnapshot(''); setLoadedTestId('');
     if (!testId) return () => { active = false; };
     setLoading(true);
     void getQuestionSheet(testId).then((sheet) => {
@@ -75,6 +83,9 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
         setWrongByStudent(rows);
         setNumberInputs(Object.fromEntries(Object.entries(rows).map(([id, numbers]) => [id, numbersText(numbers, sheet.objectiveCount)])));
         setSavedSnapshot(sheetSnapshot(sheet.objectiveCount, sheet.essayCount, rows));
+        setSavedFormSnapshot(JSON.stringify({ objectiveText: String(sheet.objectiveCount), essayText: String(sheet.essayCount), wrongByStudent: rows, numberInputs: Object.fromEntries(Object.entries(rows).map(([id, numbers]) => [id, numbersText(numbers, sheet.objectiveCount)])) }));
+      } else {
+        setSavedFormSnapshot(JSON.stringify({ objectiveText: '', essayText: '', wrongByStudent: {}, numberInputs: {} }));
       }
       setLoadedTestId(testId);
     }).catch((cause) => { if (active) setError(cause?.message || '오답표를 불러오지 못했습니다.'); })
@@ -123,18 +134,23 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
     return true;
   }
 
-  async function save() {
-    if (saveDisabled || !validate()) return;
+  async function save(): Promise<boolean> {
+    if (busy || loading || !validate()) return false;
+    if (!hasChanges) return true;
     setBusy(true); setError(''); setNotice('');
     try {
       await saveQuestionSheet(classId, sessionId, { testId, objectiveCount, essayCount, wrongByStudent: rosterRows });
       setWrongByStudent(rosterRows);
       setSavedObjectiveCount(objectiveCount);
       setSavedSnapshot(sheetSnapshot(objectiveCount, essayCount, rosterRows));
+      setSavedFormSnapshot(formSnapshot);
       setNotice('오답표를 저장했습니다. 시험 점수는 변경되지 않습니다.');
-    } catch (cause: any) { setError(cause?.message || '오답표를 저장하지 못했습니다.'); }
+      return true;
+    } catch (cause: any) { setError(cause?.message || '오답표를 저장하지 못했습니다.'); return false; }
     finally { setBusy(false); }
   }
+
+  React.useImperativeHandle(ref, () => ({ save }));
 
   async function print() {
     if (!validate() || !selectedTest) return;
@@ -217,7 +233,9 @@ export default function TestQuestionSheet({ classId, sessionId, sessionDate, cla
       </>}
     </>}
   </View>;
-}
+});
+
+export default TestQuestionSheet;
 
 const styles = StyleSheet.create({
   panel: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 14, padding: 16, marginTop: 20 },
