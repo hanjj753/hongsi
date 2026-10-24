@@ -20,7 +20,9 @@ import {
 import { AppAccessGate } from '../../components/AppAccessGate';
 import TestQuestionSheet, { type QuestionSheetHandle } from '../../components/TestQuestionSheet';
 import SessionMessagingComposer from '../../components/SessionMessagingComposer';
+import SessionQuickEntryGrid, { type QuickEntryRow } from '../../components/SessionQuickEntryGrid';
 import { useAppAccess } from '../../contexts/AppAccessContext';
+import type { QuickEntryColumn } from '../../lib/sessionQuickEntry';
 import {
   addSupabaseMakeupParticipant,
   addSupabaseClinicParticipant,
@@ -173,6 +175,7 @@ function SessionWorkspaceScreen() {
   const [busyKey, setBusyKey] = useState('');
   const [questionSheetDirty, setQuestionSheetDirty] = useState(false);
   const [messageDirty, setMessageDirty] = useState(false);
+  const [quickEntryVisible, setQuickEntryVisible] = useState(false);
   const questionSheetRef = useRef<QuestionSheetHandle>(null);
   const [leavePromptVisible, setLeavePromptVisible] = useState(false);
   const [pendingLeaveAction, setPendingLeaveAction] = useState<Parameters<typeof navigation.dispatch>[0] | null>(null);
@@ -264,6 +267,32 @@ function SessionWorkspaceScreen() {
     JSON.stringify(drafts[student.id]) !== JSON.stringify(savedDrafts[student.id])) ?? [],
   [drafts, savedDrafts, workspace]);
   const hasDraftChanges = changedStudents.length > 0;
+  const quickColumns = useMemo<QuickEntryColumn[]>(() => {
+    if (!workspace) return [];
+    return [
+      { key: 'attendance', label: '출석', kind: 'attendance', width: 176 },
+      { key: 'attendance-note', label: '출석 메모', kind: 'attendance-note', width: 170 },
+      ...workspace.homeworks.map((item) => ({ key: `homework:${item.id}`, label: `HW${item.sortOrder}: ${item.title}`, kind: 'homework' as const, itemId: item.id, width: 155 })),
+      ...workspace.tests.map((item) => ({ key: `test:${item.id}`, label: `TEST${item.sortOrder}: ${item.title}${item.resultType === 'score' ? ` / ${item.maxScore}점` : ' / 결과'}`, kind: item.resultType === 'score' ? 'score' as const : 'memo' as const, itemId: item.id, maxScore: item.maxScore, width: item.resultType === 'score' ? 155 : 190 })),
+    ];
+  }, [workspace]);
+  const quickRows = useMemo<QuickEntryRow[]>(() => workspace?.students.map((student) => {
+    const draft = drafts[student.id];
+    const values: Record<string, string> = {
+      attendance: draft?.attendance.status ?? '',
+      'attendance-note': draft?.attendance.notes ?? '',
+    };
+    for (const item of workspace.homeworks) values[`homework:${item.id}`] = draft?.homework[item.id]?.grade ?? '';
+    for (const item of workspace.tests) {
+      const result = draft?.tests[item.id];
+      values[`test:${item.id}`] = result?.mode === 'absent' ? '결시'
+        : result?.mode === 'score' ? result.score : result?.mode === 'memo' ? result.resultText : '';
+    }
+    return {
+      id: student.id, name: student.fullName, code: student.studentCode,
+      lockAttendance: Boolean(workspace.attendance[student.id]?.makeupHostSessionId), values,
+    };
+  }) ?? [], [drafts, workspace]);
   const editingHomework = workspace?.homeworks.find((item) => item.id === homeworkEditId);
   const editingTest = workspace?.tests.find((item) => item.id === testEditId);
   const hasPendingHomework = Boolean(homeworkEditId
@@ -318,6 +347,19 @@ function SessionWorkspaceScreen() {
       ...draft,
       tests: { ...draft.tests, [testId]: { ...(draft.tests[testId] ?? { mode: 'blank', score: '', resultText: '', notes: '' }), ...patch } },
     }));
+  };
+
+  const commitQuickEntry = (studentId: string, column: QuickEntryColumn, value: string) => {
+    if (column.kind === 'attendance') setAttendance(studentId, value as AttendanceStatus | '');
+    else if (column.kind === 'attendance-note') patchAttendance(studentId, { notes: value });
+    else if (column.kind === 'homework' && column.itemId) setHomeworkGrade(studentId, column.itemId, value as HomeworkGrade | '');
+    else if (column.itemId) {
+      const patch: Partial<StudentDraftState['tests'][string]> = value === '' ? { mode: 'blank', score: '', resultText: '' }
+        : value === '결시' ? { mode: 'absent', score: '', resultText: '' }
+          : column.kind === 'score' ? { mode: 'score', score: value, resultText: '' }
+            : { mode: 'memo', score: '', resultText: value };
+      patchTest(studentId, column.itemId, patch);
+    }
   };
 
   const buildStudentPayload = (studentId: string, fullName: string): StudentSessionDraft | null => {
@@ -659,6 +701,11 @@ function SessionWorkspaceScreen() {
             <Text style={styles.sectionDescription}>{workspace.students.length}명 · 빈 값으로 저장하면 미입력 상태가 됩니다.</Text>
           </View>
           <View style={[styles.tableHeaderActions, compact && styles.tableHeaderActionsCompact]}>
+            {Platform.OS === 'web' && workspace.students.length > 0 && (
+              <Pressable disabled={Boolean(busyKey) || refreshing} style={[styles.makeupAddButton, (Boolean(busyKey) || refreshing) && styles.disabled]} onPress={() => setQuickEntryVisible(true)}>
+                <Ionicons name="grid-outline" size={17} color="#4338CA" /><Text style={styles.makeupAddText}>빠른 입력</Text>
+              </Pressable>
+            )}
             {canManage && (
               <Pressable disabled={Boolean(busyKey)} style={[styles.makeupAddButton, Boolean(busyKey) && styles.disabled]} onPress={() => void openMakeupModal()}>
                 <Ionicons name="person-add-outline" size={17} color="#4338CA" /><Text style={styles.makeupAddText}>{workspace.classKind === 'clinic' ? '클리닉 참여 학생' : '다른 반 보강 학생'}</Text>
@@ -801,6 +848,12 @@ function SessionWorkspaceScreen() {
           termLabel={firstParam(params.termLabel)} day={firstParam(params.day)} workspace={workspace}
           recordsDirty={hasDraftChanges || hasPendingHomework || hasPendingTest} onDraftChange={setMessageDirty} />
       </ScrollView>
+
+      {quickEntryVisible && Platform.OS === 'web' && (
+        <SessionQuickEntryGrid rows={quickRows} columns={quickColumns} hasChanges={hasDraftChanges}
+          busy={Boolean(busyKey) || refreshing} error={actionError} onCommit={commitQuickEntry}
+          onSave={saveAll} onClose={() => setQuickEntryVisible(false)} />
+      )}
 
       <Modal visible={leavePromptVisible} transparent animationType="fade" onRequestClose={() => setLeavePromptVisible(false)}>
         <View style={styles.modalOverlay}>
