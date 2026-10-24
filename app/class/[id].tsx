@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Alert, TextInput, Platform, PermissionsAndroid, Modal, TouchableOpacity } from "react-native";
 import { useLocalSearchParams, useRouter, useRootNavigationState } from "expo-router";
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import * as Application from "expo-application";
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { Ionicons } from "@expo/vector-icons";
@@ -107,6 +108,21 @@ const buildRecurringDates = (startYmd: string, weekdays: number[], weeks: number
 
 function ClassDetailScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const [messageDraftDirty, setMessageDraftDirty] = useState(false);
+  const [approvedLeaveAction, setApprovedLeaveAction] = useState<Parameters<typeof navigation.dispatch>[0] | null>(null);
+  usePreventRemove(messageDraftDirty && !approvedLeaveAction, ({ data }) => {
+    const leave = () => setApprovedLeaveAction(data.action);
+    if (Platform.OS === 'web') {
+      if (window.confirm('작성 중인 공지 메시지가 있습니다. 지금 나가면 내용이 사라집니다. 나가시겠어요?')) leave();
+    } else {
+      Alert.alert('작성 중인 메시지', '지금 나가면 작성 내용이 사라집니다.', [
+        { text: '계속 편집', style: 'cancel' },
+        { text: '나가기', style: 'destructive', onPress: leave },
+      ]);
+    }
+  });
+  useEffect(() => { if (approvedLeaveAction) navigation.dispatch(approvedLeaveAction); }, [approvedLeaveAction, navigation]);
   const { access } = useAppAccess();
   const params = useLocalSearchParams();
   const rootNavState = useRootNavigationState();
@@ -1207,7 +1223,7 @@ function ClassDetailScreen() {
                         key={String(item.__dbId ?? idx)}
                         style={[styles.scheduleBox, boxStyle]}
                         onPress={isSupabaseDataSource
-                          ? () => router.push({ pathname: "/session/[id]", params: { id: String(item.__dbId), classId: targetId, title: String(row.__classLabel || classTitle) } })
+                          ? () => router.push({ pathname: "/session/[id]", params: { id: String(item.__dbId), classId: targetId, title: String(row.__classLabel || classTitle), termLabel: String(row[CLASSES_HEADERS.QUARTER] ?? ''), day: String(row[CLASSES_HEADERS.DAY] ?? '') } })
                           : () => handlePressSchedule(item)}
                       >
                         <Text style={[styles.boxSessionText, textStyle]}>
@@ -1273,10 +1289,8 @@ function ClassDetailScreen() {
           defaultHourlyRateKrw={String(row[CLASSES_HEADERS.HOURLY_WAGE] ?? '')} />}
         {isSupabaseDataSource && <SupabaseClassMessagingPanel
           classId={targetId}
-          classLabel={String(row.__classLabel || classTitle)}
-          termLabel={String(row[CLASSES_HEADERS.QUARTER] ?? '')}
-          day={String(row[CLASSES_HEADERS.DAY] ?? '')}
           canManage={isAdmin || isManager}
+          onDraftChange={setMessageDraftDirty}
         />}
         {!isSupabaseDataSource && <>
           <View style={styles.card}>

@@ -19,6 +19,7 @@ import {
 
 import { AppAccessGate } from '../../components/AppAccessGate';
 import TestQuestionSheet, { type QuestionSheetHandle } from '../../components/TestQuestionSheet';
+import SessionMessagingComposer from '../../components/SessionMessagingComposer';
 import { useAppAccess } from '../../contexts/AppAccessContext';
 import {
   addSupabaseMakeupParticipant,
@@ -156,7 +157,7 @@ function SessionWorkspaceScreen() {
   const compact = width < 720;
   const { access } = useAppAccess();
   const canManage = access?.app_role === 'manager' || access?.app_role === 'admin';
-  const params = useLocalSearchParams<{ id?: string | string[]; classId?: string | string[]; title?: string | string[] }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; classId?: string | string[]; title?: string | string[]; termLabel?: string | string[]; day?: string | string[] }>();
   const sessionId = firstParam(params.id);
   const classId = firstParam(params.classId);
   const routeTitle = firstParam(params.title);
@@ -171,6 +172,7 @@ function SessionWorkspaceScreen() {
   const [notice, setNotice] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [questionSheetDirty, setQuestionSheetDirty] = useState(false);
+  const [messageDirty, setMessageDirty] = useState(false);
   const questionSheetRef = useRef<QuestionSheetHandle>(null);
   const [leavePromptVisible, setLeavePromptVisible] = useState(false);
   const [pendingLeaveAction, setPendingLeaveAction] = useState<Parameters<typeof navigation.dispatch>[0] | null>(null);
@@ -271,7 +273,7 @@ function SessionWorkspaceScreen() {
     ? editingTest && (testTitle.trim() !== editingTest.title || testResultType !== editingTest.resultType
       || (testResultType === 'score' && Number(testMaxScore) !== editingTest.maxScore))
     : testTitle.trim() || testMaxScore.trim());
-  const hasUnsavedChanges = hasDraftChanges || questionSheetDirty || hasPendingHomework || hasPendingTest;
+  const hasUnsavedChanges = hasDraftChanges || questionSheetDirty || hasPendingHomework || hasPendingTest || messageDirty;
 
   usePreventRemove(hasUnsavedChanges && !approvedLeaveAction, ({ data }) => {
     setPendingLeaveAction(data.action);
@@ -619,7 +621,7 @@ function SessionWorkspaceScreen() {
               </View>
               <View style={styles.itemList}>{workspace.homeworks.map((item) => (
                 <View key={item.id} style={styles.itemRow}>
-                  <Text style={styles.itemName}>{item.title}</Text>
+                  <Text style={styles.itemName}>HW{item.sortOrder}: {item.title}</Text>
                   <Pressable style={styles.itemAction} onPress={() => { setHomeworkEditId(item.id); setHomeworkTitle(item.title); }}><Text style={styles.itemActionText}>수정</Text></Pressable>
                   <Pressable style={styles.itemDelete} onPress={() => deleteItem('homework', item.id, item.title)}><Text style={styles.itemDeleteText}>삭제</Text></Pressable>
                 </View>
@@ -642,7 +644,7 @@ function SessionWorkspaceScreen() {
               </View>
               <View style={styles.itemList}>{workspace.tests.map((item) => (
                 <View key={item.id} style={styles.itemRow}>
-                  <Text style={styles.itemName}>{item.title} · {item.resultType === 'score' ? `${formatScore(item.maxScore ?? 0)}점` : '결과 메모형'}</Text>
+                  <Text style={styles.itemName}>TEST{item.sortOrder}: {item.title} · {item.resultType === 'score' ? `${formatScore(item.maxScore ?? 0)}점` : '결과 메모형'}</Text>
                   <Pressable style={styles.itemAction} onPress={() => { setTestEditId(item.id); setTestTitle(item.title); setTestResultType(item.resultType); setTestMaxScore(item.maxScore == null ? '' : String(item.maxScore)); }}><Text style={styles.itemActionText}>수정</Text></Pressable>
                   <Pressable style={styles.itemDelete} onPress={() => deleteItem('test', item.id, item.title)}><Text style={styles.itemDeleteText}>삭제</Text></Pressable>
                 </View>
@@ -651,12 +653,12 @@ function SessionWorkspaceScreen() {
           </View>
         </View>
 
-        <View style={styles.tableHeader}>
+        <View style={[styles.tableHeader, compact && styles.tableHeaderCompact]}>
           <View>
             <Text style={styles.sectionTitle}>학생 기록</Text>
             <Text style={styles.sectionDescription}>{workspace.students.length}명 · 빈 값으로 저장하면 미입력 상태가 됩니다.</Text>
           </View>
-          <View style={styles.tableHeaderActions}>
+          <View style={[styles.tableHeaderActions, compact && styles.tableHeaderActionsCompact]}>
             {canManage && (
               <Pressable disabled={Boolean(busyKey)} style={[styles.makeupAddButton, Boolean(busyKey) && styles.disabled]} onPress={() => void openMakeupModal()}>
                 <Ionicons name="person-add-outline" size={17} color="#4338CA" /><Text style={styles.makeupAddText}>{workspace.classKind === 'clinic' ? '클리닉 참여 학생' : '다른 반 보강 학생'}</Text>
@@ -703,8 +705,8 @@ function SessionWorkspaceScreen() {
                 <Text style={[styles.headCell, { width: widths.attendance }]}>출석</Text>
                 <Text style={[styles.headCell, { width: widths.makeup }]}>보강 정보</Text>
                 <Text style={[styles.headCell, { width: widths.notes }]}>출석 메모</Text>
-                {workspace.homeworks.map((item) => <Text key={item.id} style={[styles.headCell, { width: widths.homework }]}>{item.title}</Text>)}
-                {workspace.tests.map((item) => <Text key={item.id} style={[styles.headCell, { width: item.resultType === 'memo' ? widths.testMemo : widths.test }]}>{item.title}{'\n'}<Text style={styles.maxScore}>{item.resultType === 'score' ? `/ ${item.maxScore}점` : '결과 메모'}</Text></Text>)}
+                {workspace.homeworks.map((item) => <Text key={item.id} style={[styles.headCell, { width: widths.homework }]}>HW{item.sortOrder}: {item.title}</Text>)}
+                {workspace.tests.map((item) => <Text key={item.id} style={[styles.headCell, { width: item.resultType === 'memo' ? widths.testMemo : widths.test }]}>TEST{item.sortOrder}: {item.title}{'\n'}<Text style={styles.maxScore}>{item.resultType === 'score' ? `/ ${item.maxScore}점` : '결과 메모'}</Text></Text>)}
               </View>
 
               {workspace.students.map((student) => {
@@ -795,14 +797,17 @@ function SessionWorkspaceScreen() {
         )}
         <TestQuestionSheet ref={questionSheetRef} onDirtyChange={setQuestionSheetDirty} classId={classId} sessionId={sessionId} sessionDate={workspace.sessionDate}
           classLabel={routeTitle || '수업'} tests={workspace.tests} students={workspace.students} />
+        <SessionMessagingComposer classId={classId} classLabel={routeTitle || '수업'}
+          termLabel={firstParam(params.termLabel)} day={firstParam(params.day)} workspace={workspace}
+          recordsDirty={hasDraftChanges || hasPendingHomework || hasPendingTest} onDraftChange={setMessageDirty} />
       </ScrollView>
 
       <Modal visible={leavePromptVisible} transparent animationType="fade" onRequestClose={() => setLeavePromptVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.leaveCard}>
             <Text style={styles.modalTitle}>저장하지 않은 변경사항</Text>
-            <Text style={styles.leaveMessage}>변경한 차시 기록이 있습니다. 저장하고 나가시겠어요?</Text>
-            <Pressable style={styles.leaveSaveButton} disabled={Boolean(busyKey) || refreshing} onPress={() => void saveAndLeave()}><Text style={styles.modalSaveText}>저장하고 나가기</Text></Pressable>
+            <Text style={styles.leaveMessage}>{messageDirty ? '작성 중인 메시지는 아직 대기 목록에 추가되지 않았습니다. 지금 나가면 작성 내용이 사라집니다.' : '변경한 차시 기록이 있습니다. 저장하고 나가시겠어요?'}</Text>
+            {!messageDirty && <Pressable style={styles.leaveSaveButton} disabled={Boolean(busyKey) || refreshing} onPress={() => void saveAndLeave()}><Text style={styles.modalSaveText}>저장하고 나가기</Text></Pressable>}
             <Pressable style={styles.leaveDiscardButton} onPress={() => { setLeavePromptVisible(false); setApprovedLeaveAction(pendingLeaveAction); }}><Text style={styles.leaveDiscardText}>저장하지 않고 나가기</Text></Pressable>
             <Pressable style={styles.leaveCancelButton} onPress={() => setLeavePromptVisible(false)}><Text style={styles.modalCancelText}>계속 편집</Text></Pressable>
           </View>
@@ -917,6 +922,8 @@ const styles = StyleSheet.create({
   itemDeleteText: { color: '#DC2626', fontSize: 11, fontWeight: '800' },
   tableHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 22, marginBottom: 10 },
   tableHeaderActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
+  tableHeaderCompact: { flexDirection: 'column', alignItems: 'stretch' },
+  tableHeaderActionsCompact: { justifyContent: 'flex-start' },
   makeupAddButton: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 13, borderRadius: 10, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#EEF2FF' },
   makeupAddText: { color: '#4338CA', fontSize: 12, fontWeight: '800' },
   statisticsPanel: { marginBottom: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#D1FAE5', backgroundColor: '#F0FDF4' },
