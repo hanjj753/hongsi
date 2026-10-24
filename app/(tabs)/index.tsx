@@ -450,13 +450,7 @@ export default function HomeScreen() {
             )}
 
             {isSupabaseDataSource ? (
-              <View style={styles.developmentNotice}>
-                <Text style={styles.developmentNoticeTitle}>근무 현황</Text>
-                <Text style={styles.developmentNoticeText}>
-                  수업과 차시는 수업 탭에서 확인할 수 있습니다.
-                </Text>
-                <SupabaseHomeWorkSummary />
-              </View>
+              <SupabaseHomeWorkSummary />
             ) : rows.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyStateText}>근무 기록이 없습니다.</Text>
@@ -638,7 +632,4 @@ const styles = StyleSheet.create({
 
   emptyContainer: { marginTop: 60, alignItems: 'center', justifyContent: 'center' },
   emptyStateText: { fontSize: 16, color: '#9CA3AF', fontWeight: '600' },
-  developmentNotice: { marginTop: 24, padding: 16, borderWidth: 1, borderColor: '#C7D2FE', borderRadius: 12, backgroundColor: '#EEF2FF' },
-  developmentNoticeTitle: { color: '#3730A3', fontWeight: '800', marginBottom: 6 },
-  developmentNoticeText: { color: '#4F46E5', lineHeight: 21 },
 });

@@ -12,7 +12,13 @@ export default function SupabaseHomeWorkSummary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const load = useCallback(async () => {
-    if (!access?.staff_id) return;
+    if (!access?.staff_id) {
+      setRows([]);
+      setMonth('');
+      setError('');
+      setLoading(false);
+      return;
+    }
     try {
       setError('');
       const next = await getWorkLogs(access.staff_id);
