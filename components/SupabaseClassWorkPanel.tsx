@@ -4,7 +4,7 @@ import { Picker } from './ReadablePicker';
 import { getSupabaseActiveStaff, type AssignableStaff } from '../lib/classData';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import {
-  finishMyWorkShift, getClassWorkSummary, getOpenWorkLog, saveManagedWorkLog, startMyWorkShift,
+  finishMyWorkShift, getClassWorkLogForEdit, getClassWorkSummary, getOpenWorkLog, saveManagedWorkLog, startMyWorkShift,
   type ClassWorkSummary, type WorkLog, type WorkLogDraft,
 } from '../lib/staffData';
 
@@ -33,6 +33,8 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [formVisible, setFormVisible] = useState(false);
+  const [editingWork, setEditingWork] = useState<WorkLog | null>(null);
+  const [editingStaffName, setEditingStaffName] = useState('');
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [draft, setDraft] = useState<WorkLogDraft>({
@@ -79,6 +81,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
 
   async function openManualForm() {
     setError(''); setNotice(''); setStaffLoading(true);
+    setEditingWork(null); setEditingStaffName('');
     const now = koreanTime(new Date().toISOString());
     setDraft({ staffId: '', classId, workLabel: classLabel, date: now.date,
       startTime: now.time, endTime: '', hourlyRateKrw: defaultHourlyRateKrw, notes: '' });
@@ -88,16 +91,33 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
     finally { setStaffLoading(false); }
   }
 
+  async function openEditForm(row: ClassWorkSummary) {
+    setError(''); setNotice(''); setStaffLoading(false); setBusy(true);
+    try {
+      const log = await getClassWorkLogForEdit(classId, row.id);
+      const start = koreanTime(log.startedAt);
+      setEditingWork(log);
+      setEditingStaffName(row.staffName);
+      setDraft({ staffId: log.staffId, classId, workLabel: log.workLabel,
+        date: start.date, startTime: start.time,
+        endTime: log.endedAt ? koreanTime(log.endedAt).time : '',
+        hourlyRateKrw: log.hourlyRateKrw == null ? '' : String(log.hourlyRateKrw),
+        notes: log.notes });
+      setFormVisible(true);
+    } catch (cause: any) { setError(cause?.message || '수정할 근무 기록을 불러오지 못했습니다.'); }
+    finally { setBusy(false); }
+  }
+
   async function saveManualWork() {
     setBusy(true); setError(''); setNotice('');
     try {
-      await saveManagedWorkLog(null, draft);
+      await saveManagedWorkLog(editingWork?.id ?? null, draft);
       setFormVisible(false);
       await reload();
-      setNotice(draft.endTime.trim() ? '근무 기록을 추가했습니다.' : '출근 중인 기록을 추가했습니다.');
+      setNotice(editingWork ? '근무 기록을 수정했습니다.' : draft.endTime.trim() ? '근무 기록을 추가했습니다.' : '출근 중인 기록을 추가했습니다.');
     } catch (cause: any) {
-      const message = String(cause?.message || '근무 기록을 추가하지 못했습니다.');
-      setError(cause?.code === '23505' && !draft.endTime.trim()
+      const message = String(cause?.message || '근무 기록을 저장하지 못했습니다.');
+      setError(!editingWork && cause?.code === '23505' && !draft.endTime.trim()
         ? '이 근무자는 이미 출근 중입니다. 기존 출근 기록을 확인해 주세요.' : message);
     } finally { setBusy(false); }
   }
@@ -127,6 +147,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
             <Text style={[styles.cell, styles.timeCell, styles.headerText]}>출근</Text>
             <Text style={[styles.cell, styles.timeCell, styles.headerText]}>퇴근</Text>
             <Text style={[styles.cell, styles.durationCell, styles.headerText]}>근무 시간</Text>
+            {access?.app_role === 'admin' && <Text style={[styles.cell, styles.actionCell, styles.headerText]}>관리</Text>}
           </View>
           {history.length === 0 && <Text style={styles.empty}>아직 출근 기록이 없습니다.</Text>}
           {history.map((row) => <View key={row.id} style={styles.tableRow}>
@@ -135,6 +156,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
             <Text style={[styles.cell, styles.timeCell]}>{koreanTime(row.startedAt).time}</Text>
             <Text style={[styles.cell, styles.timeCell]}>{row.endedAt ? koreanTime(row.endedAt).time : '근무 중'}</Text>
             <Text style={[styles.cell, styles.durationCell]}>{durationLabel(row.durationMinutes)}</Text>
+            {access?.app_role === 'admin' && <Pressable disabled={busy} style={styles.actionCell} onPress={() => void openEditForm(row)}><Text style={styles.refresh}>수정</Text></Pressable>}
           </View>)}
         </View>
       </ScrollView>
@@ -147,22 +169,24 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
 
     <Modal visible={formVisible} transparent animationType="fade" onRequestClose={() => setFormVisible(false)}>
       <View style={styles.overlay}><View style={styles.formModal}>
-        <Text style={styles.formTitle}>이 수업의 근무 기록 추가</Text>
+        <Text style={styles.formTitle}>{editingWork ? '이 수업의 근무 기록 수정' : '이 수업의 근무 기록 추가'}</Text>
         {!!error && <Text style={styles.error}>{error}</Text>}
         <ScrollView keyboardShouldPersistTaps="handled">
           <Text style={styles.fieldLabel}>근무자</Text>
-          {staffLoading ? <ActivityIndicator color="#4F46E5" /> :
+          {editingWork ? <Text style={styles.readonlyStaff}>{editingStaffName}</Text> : staffLoading ? <ActivityIndicator color="#4F46E5" /> :
             <View style={styles.pickerFrame}><Picker selectedValue={draft.staffId} onValueChange={(staffId) => setDraft((current) => ({ ...current, staffId: String(staffId) }))}>
               <Picker.Item label="근무자 선택" value="" />
               {staff.map((item) => <Picker.Item key={item.id} label={item.fullName} value={item.id} />)}
             </Picker></View>}
+          <Text style={styles.fieldLabel}>수업 / 근무명</Text>
+          <TextInput style={styles.input} value={draft.workLabel} onChangeText={(workLabel) => setDraft((current) => ({ ...current, workLabel }))} placeholder="수업 또는 근무명" />
           <Text style={styles.fieldLabel}>날짜</Text>
           <TextInput style={styles.input} value={draft.date} onChangeText={(date) => setDraft((current) => ({ ...current, date }))} placeholder="YYYY-MM-DD" />
           <View style={styles.timeFields}>
             <View style={styles.timeField}><Text style={styles.fieldLabel}>출근 시간</Text><TextInput style={styles.input} value={draft.startTime} onChangeText={(startTime) => setDraft((current) => ({ ...current, startTime }))} placeholder="HH:MM" /></View>
             <View style={styles.timeField}><Text style={styles.fieldLabel}>퇴근 시간 (선택)</Text><TextInput style={styles.input} value={draft.endTime} onChangeText={(endTime) => setDraft((current) => ({ ...current, endTime }))} placeholder="비우면 근무 중" /></View>
           </View>
-          <Text style={styles.formHelp}>퇴근 시간을 비워 저장하면 출근 중 상태가 됩니다. 나중에 조교 탭의 근무 기록에서 퇴근 시간을 입력할 수 있습니다.</Text>
+          <Text style={styles.formHelp}>퇴근 시간을 비워 저장하면 출근 중 상태가 됩니다. 이 화면이나 조교 탭에서 나중에 퇴근 시간을 입력할 수 있습니다.</Text>
           <Text style={styles.fieldLabel}>당시 시급 (원, 선택)</Text>
           <TextInput style={styles.input} value={draft.hourlyRateKrw} onChangeText={(hourlyRateKrw) => setDraft((current) => ({ ...current, hourlyRateKrw }))} keyboardType="numeric" placeholder="시급" />
           <Text style={styles.fieldLabel}>비고</Text>
@@ -170,7 +194,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
         </ScrollView>
         <View style={styles.formActions}>
           <Pressable style={styles.secondaryButton} onPress={() => setFormVisible(false)}><Text style={styles.secondaryText}>취소</Text></Pressable>
-          <Pressable disabled={busy || staffLoading} style={[styles.button, (busy || staffLoading) && styles.disabled]} onPress={() => void saveManualWork()}><Text style={styles.buttonText}>{busy ? '저장 중...' : '기록 추가'}</Text></Pressable>
+          <Pressable disabled={busy || staffLoading} style={[styles.button, (busy || staffLoading) && styles.disabled]} onPress={() => void saveManualWork()}><Text style={styles.buttonText}>{busy ? '저장 중...' : editingWork ? '변경 저장' : '기록 추가'}</Text></Pressable>
         </View>
       </View></View>
     </Modal>
@@ -188,11 +212,12 @@ const styles = StyleSheet.create({
   button: { marginTop: 12, alignSelf: 'flex-start', backgroundColor: '#4F46E5', borderRadius: 9, paddingHorizontal: 24, paddingVertical: 11 },
   disabled: { opacity: 0.5 }, buttonText: { color: '#FFFFFF', fontWeight: '800' },
   tableTitle: { marginTop: 25, marginBottom: 10, fontWeight: '800', fontSize: 15, color: '#111827' },
-  table: { minWidth: 600, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, overflow: 'hidden' },
+  table: { minWidth: 680, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, overflow: 'hidden' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#E5E7EB', backgroundColor: '#FFFFFF' },
   tableHeader: { backgroundColor: '#F3F4F6' }, headerText: { fontWeight: '800', color: '#374151' },
   cell: { paddingHorizontal: 10, paddingVertical: 12, fontSize: 13, color: '#111827' },
   nameCell: { width: 130 }, dateCell: { width: 120 }, timeCell: { width: 100 }, durationCell: { width: 130 },
+  actionCell: { width: 80, paddingHorizontal: 10, paddingVertical: 12 },
   empty: { padding: 14, color: '#6B7280' }, moreButton: { alignSelf: 'center', padding: 12 },
   error: { color: '#B91C1C', marginTop: 9 }, notice: { color: '#047857', marginTop: 9 },
   overlay: { flex: 1, backgroundColor: '#0007', justifyContent: 'center', alignItems: 'center', padding: 12 },
@@ -200,6 +225,7 @@ const styles = StyleSheet.create({
   formTitle: { color: '#111827', fontSize: 18, fontWeight: '800', marginBottom: 12 },
   fieldLabel: { color: '#374151', fontWeight: '700', fontSize: 13, marginTop: 12, marginBottom: 5 },
   pickerFrame: { borderColor: '#D1D5DB', borderWidth: 1, borderRadius: 8, overflow: 'hidden' },
+  readonlyStaff: { color: '#111827', fontWeight: '700', paddingVertical: 10 },
   input: { minHeight: 44, borderColor: '#D1D5DB', borderWidth: 1, borderRadius: 8, paddingHorizontal: 11, color: '#111827' },
   timeFields: { flexDirection: 'row', gap: 10 }, timeField: { flex: 1 },
   formHelp: { color: '#6B7280', fontSize: 12, lineHeight: 18, marginTop: 10 },

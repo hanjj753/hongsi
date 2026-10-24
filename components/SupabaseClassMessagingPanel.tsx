@@ -43,7 +43,8 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
   const [success, setSuccess] = useState('');
   const [editingId, setEditingId] = useState('');
   const [editContent, setEditContent] = useState('');
-  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(() => new Set());
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const [queueToggleTouched, setQueueToggleTouched] = useState(false);
   const prepared = useRef<{ fingerprint: string; items: MessageDraft[] } | null>(null);
 
   const load = useCallback(async () => {
@@ -68,6 +69,9 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     } catch { setDeviceState('invalid'); }
   }, []);
   useEffect(() => { void load(); void loadDevice(); }, [load, loadDevice]);
+  useEffect(() => {
+    if (!queueToggleTouched) setQueueExpanded(queue.length < 20);
+  }, [queue.length, queueToggleTouched]);
   useEffect(() => {
     const original = queue.find((item) => item.id === editingId)?.content ?? '';
     onDraftChange(Boolean(notice.trim()) || Boolean(editingId && editContent !== original));
@@ -191,13 +195,14 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
       <View style={styles.section}>
         <View style={styles.row}><Text style={styles.heading}>발송 대기 및 확인 필요</Text>
           <Pressable onPress={() => void load()}><Text style={styles.link}>새로고침</Text></Pressable></View>
-        <Text style={styles.description}>대기 수신자 {pendingCount}건 · 발송 완료/취소된 메시지는 숨김 · 최대 200건</Text>
-        {queue.length === 0 ? <Text style={styles.empty}>대기 중이거나 확인이 필요한 메시지가 없습니다.</Text> : queue.map((item) => <View key={item.id} style={styles.message}>
+        <Text style={styles.description}>대기 수신자 {pendingCount}건 · 메시지 {queue.length}건 · 발송 완료/취소된 메시지는 숨김 · 최대 200건</Text>
+        {queue.length > 0 && <Pressable accessibilityRole="button" accessibilityState={{ expanded: queueExpanded }}
+          onPress={() => { setQueueToggleTouched(true); setQueueExpanded((current) => !current); }}>
+          <Text style={styles.link}>{queueExpanded ? '메시지 목록 접기 ▲' : `메시지 목록 펼치기 (${queue.length}건) ▼`}</Text>
+        </Pressable>}
+        {queue.length === 0 ? <Text style={styles.empty}>대기 중이거나 확인이 필요한 메시지가 없습니다.</Text> : queueExpanded && queue.map((item) => <View key={item.id} style={styles.message}>
           <Text style={styles.candidateName}>{item.studentName} · {koreaTime(item.createdAt)}</Text>
-          <Text style={styles.previewText} numberOfLines={expandedMessages.has(item.id) ? undefined : 3}>{item.content}</Text>
-          <Pressable onPress={() => setExpandedMessages((current) => {
-            const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next;
-          })}><Text style={styles.link}>{expandedMessages.has(item.id) ? '접기' : '전체 보기'}</Text></Pressable>
+          <Text style={styles.previewText}>{item.content}</Text>
           <Text style={styles.candidateDetail}>{item.deliveries.map((delivery) => `${delivery.recipientType === 'parent' ? '학부모' : '학생'}: ${statusLabels[delivery.status] || delivery.status}`).join(' · ')}</Text>
           {item.deliveries.length > 0 && item.deliveries.every((delivery) => delivery.status === 'pending') && <>
             <Pressable disabled={busy} onPress={() => { setEditingId(item.id); setEditContent(item.content); }}><Text style={styles.link}>메시지 수정</Text></Pressable>

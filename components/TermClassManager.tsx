@@ -312,7 +312,9 @@ export function TermClassManager({ onChanged }: Props) {
                     <View style={styles.usageTrack}><View style={[styles.usageFill,
                       usagePercent >= 80 && styles.usageWarning,
                       { width: `${Math.min(100, usagePercent)}%` }]} /></View>
-                    {usagePercent >= 80 && <Text style={styles.usageAlert}>용량이 80%를 넘었습니다. 오래된 기록 정리를 검토해 주세요.</Text>}
+                    {usagePercent >= 90
+                      ? <Text style={[styles.usageAlert, styles.usageCritical]}>DB 사용량이 90% 이상입니다. 오래된 수업을 완전 삭제해 용량을 정리해 주세요. 방법은 문의 탭의 웹·앱 사용 안내에 있습니다.</Text>
+                      : usagePercent >= 80 && <Text style={styles.usageAlert}>용량이 80%를 넘었습니다. 오래된 기록 정리를 검토해 주세요.</Text>}
                   </>}
                   {usageBytes == null && usageLoading && <ActivityIndicator color="#4F46E5" />}
                   {!!usageError && <Text style={styles.errorText}>{usageError}</Text>}
@@ -461,6 +463,7 @@ const styles = StyleSheet.create({
   usageFill: { height: '100%', backgroundColor: '#4F46E5' },
   usageWarning: { backgroundColor: '#EA580C' },
   usageAlert: { color: '#C2410C', fontWeight: '700', fontSize: 12 },
+  usageCritical: { color: '#B91C1C' },
   usageHelp: { color: '#6B7280', fontSize: 12, lineHeight: 18 },
   trigger: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#FFFFFF', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: '#C7D2FE' },
   triggerText: { color: '#4F46E5', fontWeight: '700', fontSize: 13 }, pressed: { opacity: 0.7 },

@@ -145,6 +145,14 @@ export async function getOpenWorkLog(staffId: string): Promise<WorkLog | null> {
   return data ? mapWorkLog(data) : null;
 }
 
+export async function getClassWorkLogForEdit(classId: string, logId: string): Promise<WorkLog> {
+  const { data, error } = await getSupabase().from('work_logs')
+    .select('id,staff_id,class_id,work_label,started_at,ended_at,work_date,duration_minutes,hourly_rate_krw,notes')
+    .eq('class_id', classId).eq('id', logId).single();
+  if (error) throw error;
+  return mapWorkLog(data);
+}
+
 export async function getClassWorkSummary(classId: string, offset = 0, pageSize = 50): Promise<ClassWorkSummary[]> {
   const { data, error } = await getSupabase()
     .rpc('get_class_work_summary', { target_class_id: classId })
