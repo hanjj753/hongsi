@@ -75,8 +75,7 @@ export function getSupabase(): SupabaseClient {
       );
       if (!token) return null;
       // A verified Firebase login gets the Supabase transport role from our
-      // server. The database still requires a pre-registered staff email and
-      // separate administrator approval before granting access to app data.
+      // server. Database access still requires an active staff directory email.
       if (token.claims.role !== 'authenticated') {
         await bootstrapFirebaseLogin(token.token);
         token = await withTimeout(

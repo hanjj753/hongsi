@@ -65,7 +65,7 @@ function mapWorkLog(row: any): WorkLog {
 
 export async function getStaffDirectory(isAdmin: boolean, canViewBank: boolean): Promise<StaffProfile[]> {
   const [staffResult, accessResult, bankResult] = await Promise.all([
-    getSupabase().from('staff').select('id,full_name,email,phone,positions,duties,employment_status,started_on,notes,firebase_uid').order('full_name'),
+    getSupabase().from('staff').select('id,full_name,email,phone,positions,duties,employment_status,started_on,notes,firebase_uid').is('archived_at', null).order('full_name'),
     isAdmin ? getSupabase().from('app_access').select('staff_id,app_role,access_status') : Promise.resolve({ data: [], error: null }),
     canViewBank ? getSupabase().from('staff_private_details').select('staff_id,bank_account') : Promise.resolve({ data: [], error: null }),
   ]);
@@ -112,6 +112,11 @@ export async function saveStaffProfile(id: string | null, draft: StaffDraft, isA
     ? getSupabase().from('staff').update(payload).eq('id', id).select('id').single()
     : getSupabase().from('staff').insert(payload);
   const { error } = await query;
+  if (error) throw error;
+}
+
+export async function archiveStaffProfile(staffId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('archive_staff_profile', { target_staff_id: staffId });
   if (error) throw error;
 }
 

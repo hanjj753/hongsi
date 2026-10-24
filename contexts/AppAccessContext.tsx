@@ -11,8 +11,6 @@ export type AppAccessState =
   | 'checking'
   | 'signed_out'
   | 'unlinked'
-  | 'pending'
-  | 'suspended'
   | 'inactive'
   | 'approved'
   | 'error';
@@ -57,8 +55,6 @@ export function AppAccessProvider({ children }: React.PropsWithChildren) {
       setAccess(next);
       if (!next) setState('unlinked');
       else if (next.employment_status !== 'active') setState('inactive');
-      else if (next.access_status === 'pending') setState('pending');
-      else if (next.access_status === 'suspended') setState('suspended');
       else if (next.access_status === 'approved' && next.app_role) setState('approved');
       else setState('unlinked');
     } catch (error: any) {

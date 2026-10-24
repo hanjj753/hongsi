@@ -5,6 +5,7 @@ export type QuestionSheet = {
   objectiveCount: number;
   essayCount: number;
   wrongByStudent: Record<string, number[]>;
+  questionNotes: Record<string, string>;
 };
 
 export function questionLabel(number: number, objectiveCount: number): string {
@@ -30,7 +31,7 @@ export function parseWrongQuestionList(text: string, objectiveCount: number, ess
 
 export async function getQuestionSheet(testId: string): Promise<QuestionSheet | null> {
   const { data: config, error } = await getSupabase().from('test_question_sheets')
-    .select('test_id,objective_count,essay_count').eq('test_id', testId).maybeSingle();
+    .select('test_id,objective_count,essay_count,question_notes').eq('test_id', testId).maybeSingle();
   if (error) throw error;
   if (!config) return null;
   const { data: rows, error: rowsError } = await getSupabase().from('test_question_mistakes')
@@ -40,13 +41,14 @@ export async function getQuestionSheet(testId: string): Promise<QuestionSheet | 
     testId: String(config.test_id),
     objectiveCount: Number(config.objective_count),
     essayCount: Number(config.essay_count),
+    questionNotes: Object.fromEntries(Object.entries(config.question_notes ?? {}).map(([number, note]) => [number, String(note)])),
     wrongByStudent: Object.fromEntries((rows ?? []).map((row) => [String(row.student_id),
       (row.wrong_numbers ?? []).map(Number)])),
   };
 }
 
 export async function saveQuestionSheet(classId: string, sessionId: string, sheet: QuestionSheet): Promise<void> {
-  const { error } = await getSupabase().rpc('save_test_question_sheet', {
+  const { error } = await getSupabase().rpc('save_test_question_sheet_with_notes', {
     target_class_id: classId,
     target_session_id: sessionId,
     target_test_id: sheet.testId,
@@ -55,6 +57,9 @@ export async function saveQuestionSheet(classId: string, sessionId: string, shee
     student_rows: Object.entries(sheet.wrongByStudent).map(([studentId, wrongNumbers]) => ({
       student_id: studentId, wrong_numbers: wrongNumbers,
     })),
+    new_question_notes: Object.fromEntries(Object.entries(sheet.questionNotes)
+      .filter(([number, note]) => /^\d+$/.test(number) && note.trim())
+      .map(([number, note]) => [number, note])),
   });
   if (error) throw error;
 }

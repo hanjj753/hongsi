@@ -12,9 +12,14 @@ async function denied(sql) {
   await assert.rejects(db.query(sql), e => e.code === '42501');
 }
 async function actor(uid, fn, overrides = {}) {
+  const emailByUid = {
+    'admin-uid': 'admin@example.invalid', 'manager-uid': 'manager@example.invalid',
+    'assistant-uid': 'assistant@example.invalid', 'pending-uid': 'pending@example.invalid',
+    'suspended-uid': 'suspended@example.invalid', 'inactive-uid': 'inactive@example.invalid',
+  };
   await db.query("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({
     sub: uid, iss: 'https://securetoken.google.com/hongsi-assistant', aud: 'hongsi-assistant',
-    role: 'authenticated', email_verified: true, ...overrides,
+    role: 'authenticated', email_verified: true, email: emailByUid[uid] ?? '', ...overrides,
   })]);
   await db.exec('set role authenticated');
   try { await fn(); } finally { await db.exec("reset role; reset request.jwt.claims"); }
@@ -26,7 +31,9 @@ try {
     grant usage on schema public, auth to anon,authenticated;
     grant execute on function auth.jwt() to anon,authenticated;`);
   const migrationDir = new URL('../migrations/', import.meta.url);
+  const staffEmailLoginMigration = '20261025003000_staff_email_login.sql';
   for (const file of (await readdir(migrationDir)).filter((name) => /^\d+.*\.sql$/.test(name)).sort()) {
+    if (file === staffEmailLoginMigration) continue;
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   // The live development database may already have this permission change when migrations are replayed.
@@ -60,6 +67,7 @@ try {
     select setval(pg_get_serial_sequence('classes','id'),2);
     select setval(pg_get_serial_sequence('class_sessions','id'),2);
   `);
+  await db.exec(await readFile(new URL(`../migrations/${staffEmailLoginMigration}`, import.meta.url), 'utf8'));
   await test('all migrations execute and retain RLS on all 25 tables', async () => {
     assert.equal((await first("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and relkind='r' and relrowsecurity")).n, 25);
   });
@@ -92,8 +100,8 @@ try {
     }
     finally { await db.exec('reset role'); }
   });
-  await test('unregistered, pending, suspended, inactive, and foreign-project users cannot access student data', async () => {
-    for (const uid of ['unknown','pending-uid','suspended-uid','inactive-uid']) {
+  await test('unregistered, inactive, and foreign-project users cannot access student data', async () => {
+    for (const uid of ['unknown','inactive-uid']) {
       await actor(uid, async () => {
         assert.equal((await db.query('select * from students')).rows.length, 0);
         await denied("insert into students(student_code,full_name) values ('INVALID','불가')");
@@ -103,12 +111,14 @@ try {
       await actor('admin-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 0), overrides);
     }
   });
-  await test('pending users can see their own approval state without an automatic account approval', async () => {
-    await actor('pending-uid', async () => {
+  await test('listed active staff can enter without a separate approval, including legacy pending/suspended rows', async () => {
+    assert.deepEqual(await first('select app_role,access_status from app_access where staff_id=5'),
+      { app_role: 'assistant', access_status: 'approved' });
+    for (const uid of ['pending-uid', 'suspended-uid']) await actor(uid, async () => {
       const r = (await first('select public.get_my_access() as access')).access;
-      assert.equal(r.staff_id, '4'); assert.equal(r.access_status, 'pending');
+      assert.equal(r.access_status, 'approved');
       assert.equal(r.can_manage_accounts, false); assert.equal(r.can_manage_devices, false);
-      assert.equal((await db.query('select * from app_access')).rows.length, 1);
+      assert.equal((await db.query('select * from students')).rows.length, 1);
     });
   });
   await test('assistant can read and enter student data in an unassigned class with server-stamped actor', async () => {
@@ -181,23 +191,23 @@ try {
     await actor('assistant-uid', async () => {
       await denied("update app_access set app_role='admin' where staff_id=3");
       await denied("update staff set firebase_uid='assistant-uid' where id=1");
-      assert.equal((await first('select public.get_my_access() as a')).a.app_role, 'assistant');
+      assert.equal((await first('select public.get_my_access() as a')).a, null);
     }, { email:'admin@example.invalid', app_role:'admin' });
   });
-  await test('manager cannot approve accounts or suspend through employment-status edits', async () => {
+  await test('manager cannot assign account roles or change employment status', async () => {
     await actor('manager-uid', async () => {
       await denied("select public.admin_set_access(4,'assistant','approved')");
       await denied("update staff set employment_status='inactive' where id=1");
     });
   });
-  await test('admin can change another account and cannot change its own privilege', async () => {
+  await test('admin can preassign another account role and cannot change its own privilege or suspend a listed account', async () => {
     await actor('admin-uid', async () => {
       await denied("select public.admin_set_access(1,'assistant','approved')");
       await db.exec("select public.admin_set_access(4,'assistant','approved')");
     });
     await actor('pending-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 1));
-    await actor('admin-uid', async () => db.exec("select public.admin_set_access(4,'assistant','suspended')"));
-    await actor('pending-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 0));
+    await actor('admin-uid', async () => await assert.rejects(db.query("select public.admin_set_access(4,'assistant','suspended')"), e => e.code === '23514'));
+    await actor('pending-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 1));
   });
   await test('approved assistant can register and edit students while destructive enrollment actions stay managed', async () => {
     await actor('assistant-uid', async () => {
@@ -509,7 +519,7 @@ try {
     await actor('fresh-uid', async () => {
       const result = await first('select public.link_my_staff_account() as profile');
       assert.equal(result.profile.staff_id, String(newStaff.id));
-      assert.equal(result.profile.access_status, 'pending');
+      assert.equal(result.profile.access_status, 'approved');
       assert.equal(result.profile.app_role, 'assistant');
       const again = await first('select public.link_my_staff_account() as profile');
       assert.equal(again.profile.staff_id, String(newStaff.id));
@@ -549,7 +559,7 @@ try {
       assert.equal('hourly_rate_krw' in rows[0], false);
       assert.equal((await db.query('select * from work_logs where staff_id=2')).rows.length, 0);
     });
-    await actor('pending-uid', async () => await denied('select * from public.get_class_work_summary(1)'));
+    await actor('inactive-uid', async () => await denied('select * from public.get_class_work_summary(1)'));
   });
   await test('admin bank saving inserts and updates while lower roles remain blocked', async () => {
     await db.exec('set role anon');
@@ -785,6 +795,61 @@ try {
       assert.deepEqual((await first('select wrong_numbers from test_question_mistakes where test_id=1 and student_id=1')).wrong_numbers, []);
       assert.equal((await first('select score from student_test_results where test_id=1 and student_id=1')).score, '0');
     });
+  });
+  await test('question notes save atomically with mistakes and reject invalid numbers', async () => {
+    await actor('assistant-uid', async () => {
+      await db.query('select public.save_test_question_sheet_with_notes(2,2,1,3,2,$1::jsonb,$2::jsonb)',
+        [JSON.stringify([{ student_id: '1', wrong_numbers: [1, 5] }]), JSON.stringify({ '1': '개념', '5': '서술 근거' })]);
+      assert.deepEqual((await first('select question_notes from test_question_sheets where test_id=1')).question_notes,
+        { '1': '개념', '5': '서술 근거' });
+      await assert.rejects(db.query('select public.save_test_question_sheet_with_notes(2,2,1,3,2,$1::jsonb,$2::jsonb)',
+        [JSON.stringify([{ student_id: '1', wrong_numbers: [] }]), JSON.stringify({ '6': '범위 밖' })]), e => e.code === '23514');
+      assert.deepEqual((await first('select wrong_numbers from test_question_mistakes where test_id=1 and student_id=1')).wrong_numbers, [1, 5]);
+    });
+  });
+  await test('bulk student registration is all-or-nothing and does not rewrite existing contacts', async () => {
+    const firstRow = { student_code: 'BULK1', full_name: '첫 학생', parent_phone: '01012345678', joined_on: '2026-09-13' };
+    const originalParentPhone = (await first("select parent_phone from students where student_code='S1'")).parent_phone;
+    await actor('inactive-uid', async () => await assert.rejects(
+      db.query('select public.register_students_and_enroll(1,$1::jsonb)', [JSON.stringify([firstRow])]), e => e.code === '42501'));
+    await actor('assistant-uid', async () => {
+      assert.equal((await first('select public.register_students_and_enroll(1,$1::jsonb) as n',
+        [JSON.stringify([{ student_code: 'ASSISTANTBULK', full_name: '조교 등록 학생' }])])).n, 1);
+    });
+    await actor('manager-uid', async () => {
+      await assert.rejects(db.query('select public.register_students_and_enroll(1,$1::jsonb)',
+        [JSON.stringify([firstRow, { student_code: 'BULK2', full_name: '둘째 학생', parent_phone: 'invalid' }])]), e => e.code === '23514');
+      assert.equal((await first("select count(*)::int n from students where student_code='BULK1'")).n, 0);
+      assert.equal((await first('select public.register_students_and_enroll(1,$1::jsonb) as n',
+        [JSON.stringify([firstRow, { student_code: 'BULK2', full_name: '둘째 학생', parent_phone: '01087654321' },
+          { student_code: 'S1', full_name: '가상 학생', parent_phone: '01099998888' }])])).n, 3);
+      assert.equal((await first("select count(*)::int n from enrollments e join students s on s.id=e.student_id where e.class_id=1 and s.student_code in ('BULK1','BULK2')")).n, 2);
+      assert.equal((await first("select parent_phone from students where student_code='S1'")).parent_phone, originalParentPhone);
+    });
+  });
+  await test('staff archive requires admin, blocks self-removal, and preserves work history', async () => {
+    await actor('manager-uid', async () => await denied('select public.archive_staff_profile(3)'));
+    await actor('admin-uid', async () => {
+      await assert.rejects(db.query('select public.archive_staff_profile(1)'), e => e.code === '23514');
+      await db.query('select public.archive_staff_profile(3)');
+    });
+    const archived = await first('select employment_status,archived_at is not null as archived from staff where id=3');
+    assert.equal(archived.employment_status, 'inactive');
+    assert.equal(archived.archived, true);
+    assert.equal((await first('select access_status from app_access where staff_id=3')).access_status, 'suspended');
+    assert.ok((await first('select count(*)::int n from work_logs where staff_id=3')).n > 0);
+    await actor('assistant-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 0));
+  });
+  await test('manager cannot swap a listed email; admin changes revoke the old Firebase link', async () => {
+    await actor('manager-uid', async () => await denied("update staff set email='changed@example.invalid' where id=4"));
+    await actor('admin-uid', async () => await db.exec("update staff set email='changed@example.invalid' where id=4"));
+    assert.equal((await first('select firebase_uid from staff where id=4')).firebase_uid, null);
+    await actor('pending-uid', async () => assert.equal((await first('select public.get_my_access() as a')).a, null));
+    await actor('changed-uid', async () => {
+      const linked = (await first('select public.link_my_staff_account() as a')).a;
+      assert.equal(linked.staff_id, '4');
+      assert.equal(linked.access_status, 'approved');
+    }, { email: 'changed@example.invalid' });
   });
   console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
 } finally { await db.close(); }

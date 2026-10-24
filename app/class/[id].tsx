@@ -1173,6 +1173,8 @@ function ClassDetailScreen() {
           <ClassStudentManager
             classId={targetId}
             defaultJoinedOn={String(scheduleRows[0]?.[SCHEDULE_HEADERS.DATE] ?? todayYmd())}
+            termLabel={String(row[CLASSES_HEADERS.QUARTER] ?? '')}
+            school={String(row[CLASSES_HEADERS.SCHOOL] ?? '')}
           />
         )}
 

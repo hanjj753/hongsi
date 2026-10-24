@@ -17,6 +17,10 @@ export default function LoginScreen() {
   const [initializing, setInitializing] = useState(true);
   const loginInProgress = useRef(false);
 
+  useEffect(() => {
+    if (isSupabaseDataSource && accessState === 'signed_out') setInitializing(false);
+  }, [accessState]);
+
   // Supabase mode must wait for the Firebase user to be checked against the
   // staff/access tables before entering the protected tab navigator. Routing
   // immediately after the popup can race with the gate's signed-out state and

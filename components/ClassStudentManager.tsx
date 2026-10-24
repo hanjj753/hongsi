@@ -16,6 +16,8 @@ import {
 } from 'react-native';
 
 import { useAppAccess } from '../contexts/AppAccessContext';
+import { buildClassContacts, syncClassContacts } from '../lib/classContacts';
+import StudentBulkRegistration from './StudentBulkRegistration';
 import {
   deleteSupabaseClassEnrollment,
   getSupabaseClassStudents,
@@ -33,6 +35,8 @@ import {
 type Props = {
   classId: string;
   defaultJoinedOn?: string;
+  termLabel: string;
+  school: string;
 };
 
 type StudentForm = StudentInput & { joinedOn?: string };
@@ -96,7 +100,7 @@ function displayPhone(value: string): string {
   return value || '-';
 }
 
-export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
+export function ClassStudentManager({ classId, defaultJoinedOn, termLabel, school }: Props) {
   const { access } = useAppAccess();
   const { width } = useWindowDimensions();
   const compact = width < 700;
@@ -109,10 +113,12 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [bulkVisible, setBulkVisible] = useState(false);
   const [mode, setMode] = useState<'new' | 'edit'>('new');
   const [form, setForm] = useState<StudentForm>(() => emptyForm(initialJoinedOn));
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [contactSyncing, setContactSyncing] = useState(false);
   const [transferVisible, setTransferVisible] = useState(false);
   const [transferTargets, setTransferTargets] = useState<TransferTarget[]>([]);
   const [transferStudentId, setTransferStudentId] = useState('');
@@ -280,6 +286,29 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
     </Pressable>}
   </>;
 
+  const addPhoneContacts = () => {
+    const { entries, conflictCount } = buildClassContacts(termLabel, school, students);
+    if (!entries.length) {
+      setNotice('수강 중인 학생의 저장 가능한 전화번호가 없습니다.');
+      return;
+    }
+    const proceed = () => { void (async () => {
+      setContactSyncing(true); setError(''); setNotice('');
+      try {
+        const result = await syncClassContacts(termLabel, entries);
+        const summary = `분기 그룹 ${termLabel}: 새 연락처 ${result.created}개, 기존 번호 이름 수정 ${result.updated}개`;
+        setNotice(`${summary}${result.failed ? `, 실패 ${result.failed}개` : ''}${conflictCount ? ` · 여러 학생에게 중복된 번호 ${conflictCount}개 제외` : ''}`);
+        if (result.failed) setError(result.firstError || '일부 연락처를 저장하지 못했습니다. 기기의 연락처 저장 계정과 권한을 확인해 주세요.');
+      } catch (cause) { setError(errorText(cause)); }
+      finally { setContactSyncing(false); }
+    })(); };
+    const message = `수강 중인 학생의 전화번호 ${entries.length}개를 연락처에 저장합니다. 같은 번호가 있으면 이름을 바꾸고 ${termLabel} 그룹에 넣습니다.${conflictCount ? ` 서로 다른 학생에게 중복된 번호 ${conflictCount}개는 제외합니다.` : ''}`;
+    Alert.alert('연락처 추가', message, [
+      { text: '취소', style: 'cancel' },
+      { text: '추가 및 수정', onPress: proceed },
+    ]);
+  };
+
   return (
     <View style={styles.card}>
       <View style={[styles.header, compact && styles.headerCompact]}>
@@ -296,6 +325,14 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
             <Pressable style={styles.addButton} onPress={openNew}>
               <Ionicons name="person-add-outline" size={17} color="#FFFFFF" />
               <Text style={styles.addButtonText}>학생 등록</Text>
+            </Pressable>
+            {Platform.OS === 'android' && <Pressable style={styles.transferButton} disabled={contactSyncing || loading} onPress={addPhoneContacts}>
+              {contactSyncing ? <ActivityIndicator size="small" color="#4338CA" /> : <Ionicons name="call-outline" size={17} color="#4338CA" />}
+              <Text style={styles.transferButtonText}>{contactSyncing ? '연락처 저장 중...' : '연락처 추가'}</Text>
+            </Pressable>}
+            <Pressable style={styles.transferButton} onPress={() => setBulkVisible(true)}>
+              <Ionicons name="grid-outline" size={17} color="#4338CA" />
+              <Text style={styles.transferButtonText}>학생 빠른 등록</Text>
             </Pressable>
           </View>
         )}
@@ -485,6 +522,11 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
           </View>
         </View>
       </Modal>
+      {bulkVisible && <StudentBulkRegistration classId={classId} joinedOn={initialJoinedOn}
+        onClose={() => setBulkVisible(false)} onSaved={async (count) => {
+          await load();
+          setNotice(`${count}명의 학생을 등록하고 수업에 배정했습니다.`);
+        }} />}
     </View>
   );
 }

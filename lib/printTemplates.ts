@@ -17,17 +17,19 @@ export function buildQuestionSheetHtml(input: {
   testTitle: string;
   objectiveCount: number;
   essayCount: number;
+  questionNotes?: Record<string, string>;
   rows: PrintableQuestionRow[];
 }): string {
   const total = input.objectiveCount + input.essayCount;
-  const questionChunks = Array.from({ length: Math.ceil(total / 28) }, (_, page) =>
-    Array.from({ length: Math.min(28, total - page * 28) }, (_, i) => page * 28 + i + 1));
+  const questionsPerPage = Object.values(input.questionNotes ?? {}).some(Boolean) ? 14 : 28;
+  const questionChunks = Array.from({ length: Math.ceil(total / questionsPerPage) }, (_, page) =>
+    Array.from({ length: Math.min(questionsPerPage, total - page * questionsPerPage) }, (_, i) => page * questionsPerPage + i + 1));
   const studentChunks = Array.from({ length: Math.max(1, Math.ceil(input.rows.length / 26)) }, (_, page) =>
     input.rows.slice(page * 26, page * 26 + 26));
   const label = (number: number) => number <= input.objectiveCount
     ? String(number) : `서${number - input.objectiveCount}`;
   const pages = studentChunks.flatMap((students, studentPage) => questionChunks.map((questions, questionPage) => {
-    const head = questions.map((number) => `<th>${label(number)}</th>`).join('');
+    const head = questions.map((number) => `<th>${label(number)}${input.questionNotes?.[String(number)] ? `<small class="question-note">${escapeHtml(input.questionNotes[String(number)])}</small>` : ''}</th>`).join('');
     const body = students.map((student) => {
       const wrongs = new Set(student.wrongNumbers);
       const cells = questions.map((number) => `<td class="${wrongs.has(number) ? 'wrong' : ''}">${wrongs.has(number) ? 'X' : ''}</td>`).join('');
@@ -50,6 +52,7 @@ export function buildQuestionSheetHtml(input: {
     .page{page-break-after:always}.page:last-child{page-break-after:auto}h1{font-size:19px;margin:0 0 5px}p{font-size:11px;margin:0 0 10px;color:#475569}
     table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #4B5563;height:24px;text-align:center;font-size:10px;padding:2px 0}
     th{background:#F1F5F9;font-weight:700}.student{width:27mm;text-align:left;padding-left:5px;white-space:nowrap;overflow:hidden}.total{width:15mm;background:#FEF3C7;font-weight:700}
+    .question-note{display:block;font-size:7px;font-weight:400;line-height:1.2;overflow-wrap:anywhere;margin-top:2px}
     .wrong{background:#F9DADA;color:#991B1B;font-weight:800}tfoot th,tfoot td{background:#FEF3C7;font-weight:700}.footnote{margin-top:8px;font-size:9px}</style>
     </head><body>${pages}</body></html>`;
 }

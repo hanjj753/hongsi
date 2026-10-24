@@ -17,6 +17,7 @@ public class DirectSmsPackage implements ReactPackage {
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
         List<NativeModule> modules = new ArrayList<>();
         modules.add(new DirectSmsModule(reactContext));
+        modules.add(new ClassContactsModule(reactContext));
         return modules;
     }
 }

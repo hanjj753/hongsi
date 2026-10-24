@@ -12,7 +12,7 @@ export type AppAccess = {
   can_manage_accounts: boolean;
 };
 
-/** Links a verified, pre-registered email as pending; never approves it. */
+/** Links a verified Firebase user only when its email is in the active staff directory. */
 export async function getMyAppAccess(): Promise<AppAccess | null> {
   const { data: initial, error: initialError } = await getSupabase().rpc('get_my_access');
   if (initialError) throw initialError;
@@ -37,10 +37,10 @@ export function isApprovedAccess(access: AppAccess | null): boolean {
   return Boolean(access?.app_role && access.access_status === 'approved' && access.employment_status === 'active');
 }
 
-export async function setAccountAccess(staffId: string, role: AppRole, status: AccessStatus): Promise<void> {
+export async function setAccountAccess(staffId: string, role: AppRole): Promise<void> {
   // The DB RPC checks the calling user's role and rejects self-modification.
   const { error } = await getSupabase().rpc('admin_set_access', {
-    target_staff_id: staffId, new_role: role, new_status: status,
+    target_staff_id: staffId, new_role: role, new_status: 'approved',
   });
   if (error) throw error;
 }

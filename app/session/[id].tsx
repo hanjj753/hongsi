@@ -164,6 +164,10 @@ function SessionWorkspaceScreen() {
   const classId = firstParam(params.classId);
   const routeTitle = firstParam(params.title);
   const validParams = /^[1-9]\d*$/.test(classId) && /^[1-9]\d*$/.test(sessionId);
+  const leaveForClass = () => {
+    if (/^[1-9]\d*$/.test(classId)) router.replace({ pathname: '/class/[id]', params: { id: classId } });
+    else router.replace('/(tabs)/class');
+  };
 
   const [workspace, setWorkspace] = useState<SessionWorkspace | null>(null);
   const [drafts, setDrafts] = useState<Record<string, StudentDraftState>>({});
@@ -326,7 +330,7 @@ function SessionWorkspaceScreen() {
     updateDraft(studentId, (draft) => ({
       ...draft,
       attendance: status === ''
-        ? { status: '', makeupDate: '', makeupTime: '', makeupNote: '', notes: '' }
+        ? { ...draft.attendance, status: '', makeupDate: '', makeupTime: '', makeupNote: '' }
         : { ...draft.attendance, status, ...(status === '보강' ? {} : { makeupDate: '', makeupTime: '', makeupNote: '' }) },
     }));
   };
@@ -619,7 +623,7 @@ function SessionWorkspaceScreen() {
         <Text style={styles.errorTitle}>차시를 열 수 없습니다.</Text>
         <Text style={styles.centerMessage}>{loadError || '차시 정보가 없습니다.'}</Text>
         <View style={styles.centerActions}>
-          <Pressable style={styles.secondaryButton} onPress={() => router.back()}><Text style={styles.secondaryButtonText}>뒤로</Text></Pressable>
+          <Pressable style={styles.secondaryButton} onPress={leaveForClass}><Text style={styles.secondaryButtonText}>뒤로</Text></Pressable>
           <Pressable style={styles.primaryButton} onPress={() => void load(true)}><Text style={styles.primaryButtonText}>다시 불러오기</Text></Pressable>
         </View>
       </View>
@@ -629,7 +633,7 @@ function SessionWorkspaceScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="뒤로" style={styles.iconButton} onPress={() => router.back()}><Ionicons name="chevron-back" size={24} color="#111827" /></Pressable>
+        <Pressable accessibilityLabel="뒤로" style={styles.iconButton} onPress={leaveForClass}><Ionicons name="chevron-back" size={24} color="#111827" /></Pressable>
         <View style={styles.headerTextWrap}>
           <Text numberOfLines={1} style={styles.headerTitle}>{routeTitle || '차시 기록'}</Text>
           <Text style={styles.headerMeta}>{workspace.sessionNumber}차시 · {workspace.sessionDate}</Text>

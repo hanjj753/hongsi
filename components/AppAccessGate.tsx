@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { isSupabaseDataSource } from '../config/dataSource';
 import { useAppAccess, type AppAccessState } from '../contexts/AppAccessContext';
 import { getCurrentUserEmail, signOutCurrentUser } from '../utils/currentUser';
+import LoginScreen from '../app/index';
 
 const denialMessages: Partial<Record<AppAccessState, string>> = {
-  unlinked: '등록되지 않은 계정입니다. 관리자에게 계정 연결을 요청해 주세요.',
-  pending: '계정 승인을 기다리고 있습니다.',
-  suspended: '사용이 중지된 계정입니다. 관리자에게 문의해 주세요.',
+  unlinked: '현역 조교 명단에 등록된 이메일로만 로그인할 수 있습니다. 관리자에게 이메일 등록을 요청해 주세요.',
   inactive: '비활성 직원 계정입니다. 관리자에게 문의해 주세요.',
 };
 
@@ -17,10 +16,6 @@ export function AppAccessGate({ children }: React.PropsWithChildren) {
   const { state, errorMessage, refreshAccess } = useAppAccess();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
-
-  useEffect(() => {
-    if (isSupabaseDataSource && state === 'signed_out') router.replace('/');
-  }, [router, state]);
 
   if (!isSupabaseDataSource || state === 'legacy' || state === 'approved') return <>{children}</>;
 
@@ -38,12 +33,9 @@ export function AppAccessGate({ children }: React.PropsWithChildren) {
   };
 
   if (state === 'signed_out') {
-    return <View style={styles.container}>
-      <Text style={styles.title}>로그아웃되었습니다.</Text>
-      <Pressable style={styles.primaryButton} onPress={() => router.replace('/')}>
-        <Text style={styles.primaryButtonText}>로그인 화면으로 이동</Text>
-      </Pressable>
-    </View>;
+    // The tab navigator can unmount while the root stack is changing routes.
+    // Render the login screen here too, so a delayed replace never leaves a blank view.
+    return <LoginScreen />;
   }
 
   if (state === 'checking') {

@@ -599,6 +599,34 @@ export async function saveAndEnrollSupabaseStudent(classId: string, input: Stude
   return String(data);
 }
 
+export async function saveAndEnrollSupabaseStudents(classId: string, inputs: StudentInput[]): Promise<number> {
+  if (!positiveId(classId)) throw new Error('수업 ID가 올바르지 않습니다.');
+  if (inputs.length < 1 || inputs.length > 100) throw new Error('한 번에 1~100명까지 등록할 수 있습니다.');
+  const rows = inputs.map((input, index) => {
+    const joinedOn = input.joinedOn?.trim() ?? '';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(joinedOn) ? new Date(`${joinedOn}T00:00:00Z`) : null;
+    if (!date || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== joinedOn) {
+      throw new Error(`${index + 1}행: 수강 시작일은 YYYY-MM-DD 형식으로 입력해 주세요.`);
+    }
+    try {
+      const item = normalizeStudentInput(input, false);
+      return {
+        student_code: item.studentCode, full_name: item.fullName,
+        student_phone: item.studentPhone, parent_phone: item.parentPhone,
+        email: item.email, default_message_recipients: item.defaultMessageRecipients,
+        joined_on: joinedOn,
+      };
+    } catch (error: any) { throw new Error(`${index + 1}행: ${error?.message || '학생 정보를 확인해 주세요.'}`); }
+  });
+  const codes = rows.map((row) => row.student_code.toUpperCase()).filter(Boolean);
+  if (new Set(codes).size !== codes.length) throw new Error('같은 학생 ID가 표에 두 번 입력되었습니다.');
+  const { data, error } = await getSupabase().rpc('register_students_and_enroll', {
+    target_class_id: classId, student_rows: rows,
+  });
+  if (error) throw error;
+  return Number(data);
+}
+
 export async function getSupabaseTransferTargets(sourceClassId: string): Promise<TransferTarget[]> {
   if (!positiveId(sourceClassId)) throw new Error('수업 ID가 올바르지 않습니다.');
   const { data: source, error: sourceError } = await getSupabase().from('classes')

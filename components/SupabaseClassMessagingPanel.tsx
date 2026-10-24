@@ -38,7 +38,7 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
   const [deviceState, setDeviceState] = useState<'unregistered' | 'pending' | 'enabled' | 'invalid'>('unregistered');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{ kind: 'queue' | 'send'; label: string; done: number; total: number } | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [editingId, setEditingId] = useState('');
@@ -94,9 +94,9 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
         student_id: item.studentId, content: item.content, request_id: Crypto.randomUUID(),
       })) };
     }
-    setProgress({ label: '메시지를 대기 목록에 추가하는 중', done: 0, total: prepared.current.items.length });
+    setProgress({ kind: 'queue', label: '메시지를 대기 목록에 추가하는 중', done: 0, total: prepared.current.items.length });
     const created = await queueClassMessages(classId, targetSessionId, prepared.current.items,
-      (done, total) => setProgress({ label: '메시지를 대기 목록에 추가하는 중', done, total }));
+      (done, total) => setProgress({ kind: 'queue', label: '메시지를 대기 목록에 추가하는 중', done, total }));
     prepared.current = null;
     await load();
     return created;
@@ -121,7 +121,7 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     let submitted = 0;
     let failed = 0;
     const targetCount = Math.min(pendingCount, 200);
-    setProgress({ label: '문자 발송 준비 중', done: 0, total: targetCount });
+    setProgress({ kind: 'send', label: '문자 발송 준비 중', done: 0, total: targetCount });
     try {
       const permission = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.SEND_SMS);
       if (permission !== PermissionsAndroid.RESULTS.GRANTED) throw new Error('Android 문자 발송 권한이 필요합니다.');
@@ -130,21 +130,21 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
       for (let index = 0; index < 200; index++) {
         const item = await claimNextMessageDelivery(classId, pairing);
         if (!item) break;
-        setProgress({ label: 'Android 기기에 문자를 제출하는 중', done: submitted + failed, total: targetCount });
+        setProgress({ kind: 'send', label: 'Android 기기에 문자를 제출하는 중', done: submitted + failed, total: targetCount });
         try {
           await DirectSms.sendDirectSms(item.phone.replace(/\D/g, ''), item.content);
         } catch (cause: any) {
           try { await finishMessageDelivery(item, pairing, 'failed', cause?.message || String(cause)); }
           catch { throw new Error('문자 발송 실패 후 DB 상태를 확인하지 못했습니다. 전송 중 기록을 확인해 주세요. 자동 재발송하지 않습니다.'); }
           failed++;
-          setProgress({ label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
+          setProgress({ kind: 'send', label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
           await new Promise((resolve) => setTimeout(resolve, 1500));
           continue;
         }
         try { await finishMessageDelivery(item, pairing, 'submitted'); }
         catch { throw new Error('기기에 문자를 제출했지만 DB 상태를 확인하지 못했습니다. 전송 중 기록을 확인해 주세요. 자동 재발송하지 않습니다.'); }
         submitted++;
-        setProgress({ label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
+        setProgress({ kind: 'send', label: `기기 제출 ${submitted}건 · 실패 ${failed}건`, done: submitted + failed, total: targetCount });
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
       setSuccess(`기기 제출 ${submitted}건 · 실패 ${failed}건. 실제 수신 여부는 통신사 결과를 확인해 주세요.`);
@@ -190,17 +190,15 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     <Text style={styles.description}>여기서는 수업 공지를 추가하고 문자 발송을 관리합니다. 차시별 개별 메시지는 해당 차시 화면에서 작성합니다. 학생별 기본 수신자에 따라 학부모만 또는 학생·학부모 모두에게 보냅니다.</Text>
     {!!error && <Text style={styles.error}>{error}</Text>}
     {!!success && <Text style={styles.success}>{success}</Text>}
-    {progress && <View style={styles.progressCard} accessibilityLabel={`${progress.label} ${progress.done}/${progress.total}`}>
-      <Text style={styles.progressLabel}>{progress.label} · {progress.done}/{progress.total}건</Text>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${Math.min(100, Math.round(progress.done / Math.max(progress.total, 1) * 100))}%` }]} />
-      </View>
-    </View>}
     {loading ? <ActivityIndicator color="#4F46E5" /> : <>
       <View style={styles.section}>
         <Text style={styles.heading}>공지 메시지 추가</Text>
         <Text style={styles.description}>현재 수강 중이고 필요한 전화번호가 등록된 학생 {activeStudents.filter(eligible).length}명</Text>
         <TextInput style={styles.input} multiline value={notice} onChangeText={setNotice} placeholder="공지 내용을 입력하세요" placeholderTextColor="#9CA3AF" />
+        {progress?.kind === 'queue' && <View style={styles.progressCard} accessibilityLabel={`${progress.label} ${progress.done}/${progress.total}`}>
+          <Text style={styles.progressLabel}>{progress.label} · {progress.done}/{progress.total}건</Text>
+          <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.min(100, Math.round(progress.done / Math.max(progress.total, 1) * 100))}%` }]} /></View>
+        </View>}
         <Pressable disabled={busy || !notice.trim()} style={[styles.button, (busy || !notice.trim()) && styles.disabled]} onPress={() => void queueNotice()}>
           <Text style={styles.buttonText}>공지 추가</Text>
         </Pressable>
@@ -248,6 +246,12 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
             <Pressable disabled={busy} style={[styles.button, busy && styles.disabled]} onPress={() => void registerDevice()}><Text style={styles.buttonText}>이 기기 등록 요청</Text></Pressable>
             <Pressable onPress={() => void loadDevice()}><Text style={styles.link}>승인 상태 새로고침</Text></Pressable>
           </>}
+          {progress?.kind === 'send' && <View style={styles.progressCard} accessibilityLabel={`${progress.label} ${progress.done}/${progress.total}`}>
+            <Text style={styles.progressLabel}>{progress.label} · {progress.done}/{progress.total}건</Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${Math.min(100, Math.round(progress.done / Math.max(progress.total, 1) * 100))}%` }]} />
+            </View>
+          </View>}
           {deviceState === 'enabled' && <Pressable disabled={busy || pendingCount === 0} style={[styles.button, (busy || pendingCount === 0) && styles.disabled]}
             onPress={() => confirmAction('문자 발송', `대기 수신자 ${pendingCount}건을 이 Android 기기로 제출할까요?`, () => void sendPending())}>
             <Text style={styles.buttonText}>{busy ? '전송 중...' : `대기 문자 발송 (${pendingCount}건)`}</Text>

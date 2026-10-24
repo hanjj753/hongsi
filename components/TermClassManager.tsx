@@ -125,7 +125,7 @@ export function TermClassManager({ onChanged }: Props) {
   const activeTerms = useMemo(() => terms.filter((item) => item.isActive), [terms]);
   const selectedClasses = useMemo(() => classes
     .filter((item) => item.termLabel === selectedTerm)
-    .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.school.localeCompare(b.school, 'ko-KR') || a.subject.localeCompare(b.subject, 'ko-KR')),
+    .sort((a, b) => Number(b.isActive) - Number(a.isActive) || Number(a.id) - Number(b.id)),
   [classes, selectedTerm]);
 
   const refreshAll = async () => {
@@ -318,7 +318,7 @@ export function TermClassManager({ onChanged }: Props) {
                   </>}
                   {usageBytes == null && usageLoading && <ActivityIndicator color="#4F46E5" />}
                   {!!usageError && <Text style={styles.errorText}>{usageError}</Text>}
-                  <Text style={styles.usageHelp}>Supabase 무료 플랜의 DB 크기 한도 기준입니다. 데이터·인덱스를 포함한 현재 크기이며 파일 저장소 용량은 별개입니다.</Text>
+                  <Text style={styles.usageHelp}>데이터·인덱스를 포함한 DB 파일 크기입니다. 수업을 완전 삭제해도 빈 공간을 재사용하므로 숫자가 즉시 줄지 않을 수 있습니다. 파일 저장소 용량은 별개입니다.</Text>
                 </View>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>분기</Text>

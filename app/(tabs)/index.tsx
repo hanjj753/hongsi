@@ -424,7 +424,7 @@ export default function HomeScreen() {
             </View>
             {isSupabaseDataSource && <View style={styles.roleRow}>
               <Text style={styles.roleLabel}>앱 권한</Text>
-              <Text style={styles.roleValue}>{access?.app_role === 'admin' ? '관리자' : access?.app_role === 'manager' ? '매니저' : access?.app_role === 'assistant' ? '조교' : '승인 대기'}</Text>
+              <Text style={styles.roleValue}>{access?.app_role === 'admin' ? '관리자' : access?.app_role === 'manager' ? '매니저' : access?.app_role === 'assistant' ? '조교' : '권한 확인 중'}</Text>
             </View>}
 
             {/* Admin인 경우에만 보이는 버튼 */}

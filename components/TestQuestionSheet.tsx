@@ -5,7 +5,7 @@ import type { ClassStudent, SessionTest } from '../lib/classData';
 import { getQuestionSheet, parseWrongQuestionList, questionLabel, saveQuestionSheet } from '../lib/questionSheetData';
 import { buildQuestionSheetHtml, openPdfDocument } from '../lib/printDocuments';
 
-const questionCellWidth = 36;
+const questionCellWidth = 82;
 type Props = {
   classId: string;
   sessionId: string;
@@ -21,8 +21,9 @@ export type QuestionSheetHandle = { save: () => Promise<boolean> };
 const numbersText = (numbers: number[], objectiveCount: number) =>
   numbers.map((number) => questionLabel(number, objectiveCount)).join(', ');
 
-function sheetSnapshot(objectiveCount: number, essayCount: number, rows: Record<string, number[]>): string {
-  return JSON.stringify({ objectiveCount, essayCount, rows: Object.entries(rows)
+function sheetSnapshot(objectiveCount: number, essayCount: number, rows: Record<string, number[]>, notes: Record<string, string>): string {
+  return JSON.stringify({ objectiveCount, essayCount, notes: Object.entries(notes).filter(([, note]) => note.trim())
+    .sort(([left], [right]) => Number(left) - Number(right)), rows: Object.entries(rows)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([studentId, numbers]) => [studentId, [...numbers].sort((left, right) => left - right)]) });
 }
@@ -32,6 +33,7 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
   const [objectiveText, setObjectiveText] = useState('');
   const [essayText, setEssayText] = useState('');
   const [wrongByStudent, setWrongByStudent] = useState<Record<string, number[]>>({});
+  const [questionNotes, setQuestionNotes] = useState<Record<string, string>>({});
   const [numberInputs, setNumberInputs] = useState<Record<string, string>>({});
   const [pendingInputs, setPendingInputs] = useState<Record<string, boolean>>({});
   const [savedObjectiveCount, setSavedObjectiveCount] = useState<number | null>(null);
@@ -54,9 +56,9 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
     return Object.fromEntries(Object.entries(wrongByStudent).filter(([studentId]) => roster.has(studentId)));
   }, [students, wrongByStudent]);
   const hasChanges = countsValid && loadedTestId === testId
-    && (savedSnapshot === null || savedSnapshot !== sheetSnapshot(objectiveCount, essayCount, rosterRows));
+    && (savedSnapshot === null || savedSnapshot !== sheetSnapshot(objectiveCount, essayCount, rosterRows, questionNotes));
   const saveDisabled = busy || loading || !hasChanges;
-  const formSnapshot = JSON.stringify({ objectiveText, essayText, wrongByStudent: rosterRows, numberInputs });
+  const formSnapshot = JSON.stringify({ objectiveText, essayText, wrongByStudent: rosterRows, numberInputs, questionNotes });
   const isDirty = loadedTestId === testId && savedFormSnapshot !== '' && formSnapshot !== savedFormSnapshot;
 
   useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
@@ -68,7 +70,7 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
   useEffect(() => {
     let active = true;
     setError(''); setNotice('');
-    setObjectiveText(''); setEssayText(''); setWrongByStudent({}); setNumberInputs({}); setPendingInputs({}); setSavedObjectiveCount(null);
+    setObjectiveText(''); setEssayText(''); setWrongByStudent({}); setQuestionNotes({}); setNumberInputs({}); setPendingInputs({}); setSavedObjectiveCount(null);
     setSavedSnapshot(null); setSavedFormSnapshot(''); setLoadedTestId('');
     if (!testId) return () => { active = false; };
     setLoading(true);
@@ -81,11 +83,12 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
         const allowed = new Set(students.map((student) => student.id));
         const rows = Object.fromEntries(Object.entries(sheet.wrongByStudent).filter(([id]) => allowed.has(id)));
         setWrongByStudent(rows);
+        setQuestionNotes(sheet.questionNotes);
         setNumberInputs(Object.fromEntries(Object.entries(rows).map(([id, numbers]) => [id, numbersText(numbers, sheet.objectiveCount)])));
-        setSavedSnapshot(sheetSnapshot(sheet.objectiveCount, sheet.essayCount, rows));
-        setSavedFormSnapshot(JSON.stringify({ objectiveText: String(sheet.objectiveCount), essayText: String(sheet.essayCount), wrongByStudent: rows, numberInputs: Object.fromEntries(Object.entries(rows).map(([id, numbers]) => [id, numbersText(numbers, sheet.objectiveCount)])) }));
+        setSavedSnapshot(sheetSnapshot(sheet.objectiveCount, sheet.essayCount, rows, sheet.questionNotes));
+        setSavedFormSnapshot(JSON.stringify({ objectiveText: String(sheet.objectiveCount), essayText: String(sheet.essayCount), wrongByStudent: rows, numberInputs: Object.fromEntries(Object.entries(rows).map(([id, numbers]) => [id, numbersText(numbers, sheet.objectiveCount)])), questionNotes: sheet.questionNotes }));
       } else {
-        setSavedFormSnapshot(JSON.stringify({ objectiveText: '', essayText: '', wrongByStudent: {}, numberInputs: {} }));
+        setSavedFormSnapshot(JSON.stringify({ objectiveText: '', essayText: '', wrongByStudent: {}, numberInputs: {}, questionNotes: {} }));
       }
       setLoadedTestId(testId);
     }).catch((cause) => { if (active) setError(cause?.message || '오답표를 불러오지 못했습니다.'); })
@@ -122,10 +125,11 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
   function validate(): boolean {
     if (!selectedTest) { setError('시험을 먼저 추가해 주세요.'); return false; }
     if (!countsValid) { setError('객관식·서술형 문항 수를 입력해 주세요. 합계는 1~100문항입니다.'); return false; }
-    if (savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && Object.keys(wrongByStudent).length > 0) {
-      setError('객관식 문항 수를 바꾸면 기존 서술형 오답 번호가 달라집니다. 아래에서 기존 오답 입력을 초기화하고 다시 입력해 주세요.');
+    if (savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && (Object.keys(wrongByStudent).length > 0 || Object.keys(questionNotes).length > 0)) {
+      setError('객관식 문항 수를 바꾸면 서술형 오답·문항 메모 번호가 달라집니다. 아래에서 기존 입력을 초기화하고 다시 입력해 주세요.');
       return false;
     }
+    if (Object.keys(questionNotes).some((number) => Number(number) > total)) { setError('문항 수가 줄어 기존 문항 메모가 범위를 벗어났습니다.'); return false; }
     if (Object.values(pendingInputs).some(Boolean)) { setError('번호 입력 후 각 학생의 적용을 먼저 눌러 주세요.'); return false; }
     const roster = new Set(students.map((student) => student.id));
     const invalid = Object.entries(wrongByStudent).some(([studentId, numbers]) => roster.has(studentId)
@@ -139,10 +143,10 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
     if (!hasChanges) return true;
     setBusy(true); setError(''); setNotice('');
     try {
-      await saveQuestionSheet(classId, sessionId, { testId, objectiveCount, essayCount, wrongByStudent: rosterRows });
+      await saveQuestionSheet(classId, sessionId, { testId, objectiveCount, essayCount, wrongByStudent: rosterRows, questionNotes });
       setWrongByStudent(rosterRows);
       setSavedObjectiveCount(objectiveCount);
-      setSavedSnapshot(sheetSnapshot(objectiveCount, essayCount, rosterRows));
+      setSavedSnapshot(sheetSnapshot(objectiveCount, essayCount, rosterRows, questionNotes));
       setSavedFormSnapshot(formSnapshot);
       setNotice('오답표를 저장했습니다. 시험 점수는 변경되지 않습니다.');
       return true;
@@ -158,7 +162,7 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
     try {
       await openPdfDocument(buildQuestionSheetHtml({
         title: `${classLabel} ${sessionDate}`, date: sessionDate, testTitle: selectedTest.title,
-        objectiveCount, essayCount,
+        objectiveCount, essayCount, questionNotes,
         rows: students.map((student) => ({
           studentName: student.fullName, studentCode: student.studentCode,
           entered: Object.prototype.hasOwnProperty.call(wrongByStudent, student.id),
@@ -179,21 +183,32 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
       </Picker></View>
       {loading ? <ActivityIndicator color="#4F46E5" style={{ marginTop: 18 }} /> : <>
         <View style={styles.counts}>
-          <View style={styles.countField}><Text style={styles.label}>객관식 문항 수</Text><TextInput style={styles.input} keyboardType="number-pad" value={objectiveText} onChangeText={(text) => { setObjectiveText(text); setNotice(''); }} placeholder="예: 24" /></View>
-          <View style={styles.countField}><Text style={styles.label}>서술형 문항 수</Text><TextInput style={styles.input} keyboardType="number-pad" value={essayText} onChangeText={(text) => { setEssayText(text); setNotice(''); }} placeholder="예: 2 또는 0" /></View>
+          <View style={styles.countField}><Text style={styles.label}>객관식 문항 수</Text><TextInput style={styles.input} keyboardType="number-pad" value={objectiveText} onChangeText={(text) => { setObjectiveText(text); setNotice(''); }} placeholder="예: 24" placeholderTextColor="#9CA3AF" /></View>
+          <View style={styles.countField}><Text style={styles.label}>서술형 문항 수</Text><TextInput style={styles.input} keyboardType="number-pad" value={essayText} onChangeText={(text) => { setEssayText(text); setNotice(''); }} placeholder="예: 2 또는 0" placeholderTextColor="#9CA3AF" /></View>
         </View>
-        <Text style={styles.help}>번호 입력 예: 1, 5, 서2 · 번호를 적은 뒤 적용을 눌러야 저장 대상에 반영됩니다. 빈칸을 적용하면 전부 정답입니다.</Text>
-        {savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && Object.keys(wrongByStudent).length > 0 && <View style={styles.warning}>
-          <Text style={styles.warningText}>객관식 문항 수가 바뀌면 기존 서술형 번호의 의미가 달라집니다. 저장하기 전에 기존 오답을 지우고 새 문항 수로 다시 입력해 주세요.</Text>
-          <Pressable onPress={() => { setWrongByStudent({}); setNumberInputs({}); setPendingInputs({}); setSavedObjectiveCount(objectiveCount); setError(''); setNotice('기존 오답 입력을 초기화했습니다. 다시 입력한 뒤 저장해 주세요.'); }}>
-            <Text style={styles.warningAction}>기존 오답 입력 초기화</Text>
+        <Text style={styles.help}>문항 번호 아래에 간단한 설명을 적을 수 있습니다. 번호 입력 예: 1, 5, 서2 · 번호를 적은 뒤 적용을 눌러야 반영됩니다. 빈칸을 적용하면 전부 정답입니다.</Text>
+        {savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && (Object.keys(wrongByStudent).length > 0 || Object.keys(questionNotes).length > 0) && <View style={styles.warning}>
+          <Text style={styles.warningText}>객관식 문항 수가 바뀌면 기존 서술형 번호의 의미가 달라집니다. 기존 오답·문항 메모를 초기화하고 다시 입력해 주세요.</Text>
+          <Pressable onPress={() => { setWrongByStudent({}); setQuestionNotes({}); setNumberInputs({}); setPendingInputs({}); setSavedObjectiveCount(objectiveCount); setError(''); setNotice('기존 오답·문항 메모를 초기화했습니다. 다시 입력한 뒤 저장해 주세요.'); }}>
+            <Text style={styles.warningAction}>기존 입력 초기화</Text>
           </Pressable>
         </View>}
-        {countsValid && !(savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && Object.keys(wrongByStudent).length > 0) && <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableScroll}>
+        {countsValid && !(savedObjectiveCount !== null && objectiveCount !== savedObjectiveCount && (Object.keys(wrongByStudent).length > 0 || Object.keys(questionNotes).length > 0)) && <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableScroll}>
           <View>
             <View style={[styles.tableRow, styles.headingRow]}>
               <Text style={[styles.cell, styles.studentCell, styles.headingText]}>학생</Text>
-              {questionNumbers.map((number) => <Text key={number} style={[styles.cell, styles.questionCell, styles.headingText]}>{questionLabel(number, objectiveCount)}</Text>)}
+              {questionNumbers.map((number) => <View key={number} style={[styles.cell, styles.questionCell, styles.questionHeading]}>
+                <Text style={styles.headingText}>{questionLabel(number, objectiveCount)}</Text>
+                <TextInput accessibilityLabel={`${questionLabel(number, objectiveCount)}번 문항 메모`} style={styles.questionMemo}
+                  value={questionNotes[String(number)] ?? ''} maxLength={60} editable={!busy}
+                  onChangeText={(note) => { setQuestionNotes((current) => {
+                    const next = { ...current };
+                    if (note.trim()) next[String(number)] = note;
+                    else delete next[String(number)];
+                    return next;
+                  }); setNotice(''); }}
+                  placeholder="메모" placeholderTextColor="#94A3B8" />
+              </View>)}
               <Text style={[styles.cell, styles.totalCell, styles.headingText]}>오답수</Text>
               <Text style={[styles.cell, styles.inputCell, styles.headingText]}>틀린 번호 일괄 입력</Text>
             </View>
@@ -248,6 +263,8 @@ const styles = StyleSheet.create({
   headingRow: { backgroundColor: '#F1F5F9' }, totalRow: { backgroundColor: '#FEF3C7' },
   cell: { minHeight: 37, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center' },
   studentCell: { width: 130, paddingHorizontal: 6, alignItems: 'flex-start' }, questionCell: { width: questionCellWidth },
+  questionHeading: { minHeight: 67, paddingHorizontal: 3 },
+  questionMemo: { width: '100%', minHeight: 28, marginTop: 3, paddingHorizontal: 3, borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 4, backgroundColor: '#FFFFFF', color: '#334155', fontSize: 10, textAlign: 'center' },
   totalCell: { width: 65, backgroundColor: '#FEF3C7' }, inputCell: { width: 315 },
   headingText: { color: '#334155', fontWeight: '800', fontSize: 12 }, name: { color: '#111827', fontWeight: '700', fontSize: 12 },
   studentMeta: { color: '#64748B', fontSize: 10 }, wrongCell: { backgroundColor: '#FECACA' }, wrongText: { color: '#991B1B', fontWeight: '800', fontSize: 13 },
