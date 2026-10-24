@@ -21,7 +21,7 @@ const eligible = (student: ClassStudent) =>
 
 export default function SessionMessagingComposer({ classId, classLabel, termLabel, day, workspace, recordsDirty, onDraftChange }: Props) {
   const initialTemplate = useMemo(() => defaultSessionMessageTemplate(workspace), [workspace.homeworks, workspace.tests]);
-  const eligibleStudents = useMemo(() => workspace.students.filter((student) => student.participationType !== 'makeup' && eligible(student)).sort((a, b) => a.fullName.localeCompare(b.fullName, 'ko')),
+  const eligibleStudents = useMemo(() => workspace.students.filter(eligible).sort((a, b) => a.fullName.localeCompare(b.fullName, 'ko')),
     [workspace.students]);
   const [template, setTemplate] = useState(initialTemplate);
   const [templateTouched, setTemplateTouched] = useState(false);
@@ -93,13 +93,14 @@ export default function SessionMessagingComposer({ classId, classLabel, termLabe
     <Text style={styles.label}>받을 학생 · {chosenStudents.length}/{eligibleStudents.length}명</Text>
     <Pressable onPress={() => { setSelected(new Set(eligibleStudents.map((student) => student.id))); setSelectionTouched(true); setQueued(false); }}><Text style={styles.link}>발송 가능한 학생 전체 선택</Text></Pressable>
     <View style={styles.students}>{workspace.students.map((student) => {
-      const canSend = student.participationType !== 'makeup' && eligible(student);
+      const canSend = eligible(student);
       return <Pressable key={student.id} disabled={!canSend} style={styles.student} onPress={() => {
         setSelected((current) => { const next = new Set(current); if (next.has(student.id)) next.delete(student.id); else next.add(student.id); return next; });
         setSelectionTouched(true); setQueued(false);
       }}>
         <Text style={styles.studentName}>{selected.has(student.id) ? '☑' : '☐'} {student.fullName}</Text>
-        {!canSend && <Text style={styles.help}>{student.participationType === 'makeup' ? '다른 반 보강 학생은 원래 반에서 안내합니다.' : '필요한 전화번호가 없습니다.'}</Text>}
+        {student.participationType === 'makeup' && <Text style={styles.help}>다른 반 보강 · 이 차시의 메시지 대상으로 선택할 수 있습니다.</Text>}
+        {!canSend && <Text style={styles.help}>필요한 전화번호가 없습니다.</Text>}
       </Pressable>;
     })}</View>
     {previewStudent && <View style={styles.preview}><Text style={styles.label}>미리보기 · {previewStudent.fullName}</Text><Text style={styles.previewText}>{preview}</Text></View>}

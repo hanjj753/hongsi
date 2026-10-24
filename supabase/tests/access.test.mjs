@@ -620,6 +620,51 @@ try {
     });
     await actor('assistant-uid', async () => await assert.rejects(db.query('select public.get_sending_device_state($1,$2)', [pair.device_id, pair.secret]), e => e.code === '42501'));
   });
+  await test('reinstall can re-pair the same Android ID, while manager deletion revokes its secret and preserves the audit row', async () => {
+    let pair;
+    await actor('assistant-uid', async () => {
+      pair = (await first("select public.register_sending_device('REINSTALLED PHONE','android-test-1') as pair")).pair;
+      assert.equal((await first('select public.get_sending_device_state($1,$2) as state', [pair.device_id, pair.secret])).state.is_enabled, false);
+    });
+    await actor('manager-uid', async () => {
+      await db.query('update sending_devices set is_enabled=true where id=$1', [pair.device_id]);
+      await db.query('select public.archive_sending_device($1)', [pair.device_id]);
+    });
+    assert.equal((await first('select archived_at is not null as archived,is_enabled from sending_devices where id=$1', [pair.device_id])).archived, true);
+    await actor('assistant-uid', async () => {
+      await assert.rejects(db.query('select public.get_sending_device_state($1,$2)', [pair.device_id, pair.secret]), e => e.code === '42501');
+      const renewed = (await first("select public.register_sending_device('PHONE AFTER ARCHIVE','android-test-1') as pair")).pair;
+      assert.equal(renewed.device_id, pair.device_id);
+      assert.notEqual(renewed.secret, pair.secret);
+    });
+    assert.deepEqual(await first('select archived_at,is_enabled from sending_devices where id=$1', [pair.device_id]), { archived_at: null, is_enabled: false });
+    await actor('assistant-uid', async () => await denied(`select public.archive_sending_device('${pair.device_id}')`));
+  });
+  await test('makeup messages require this session participation; pending edits preserve immutable audit', async () => {
+    let visitorId;
+    await actor('manager-uid', async () => {
+      visitorId = (await first("select public.register_student_and_enroll(1,null,'SMS-VISITOR','문자 보강생','','01012344321','','parent','2026-09-01') as id")).id;
+      await db.query("select public.add_makeup_participant(2,2,$1,1,1,'문자 테스트')", [visitorId]);
+    });
+    const payload = JSON.stringify([{ student_id: visitorId, request_id: '22222222-2222-4222-8222-222222222222', content: '보강 안내' }]);
+    await assert.rejects(db.query("insert into messages(class_id,student_id,session_id,student_name_snapshot,parent_phone_snapshot,content) values (2,$1,null,'문자 보강생','01012344321','등록되지 않은 반')", [visitorId]), e => e.code === '23514');
+    await actor('manager-uid', async () => {
+      await assert.rejects(db.query('select public.create_class_messages(2,null,$1::jsonb)', [payload]), e => e.code === '23514');
+      assert.equal((await first('select public.create_class_messages(2,2,$1::jsonb) as result', [payload])).result.created, 1);
+    });
+    const originalId = (await first("select id from messages where content='보강 안내'")).id;
+    let newId;
+    await actor('assistant-uid', async () => {
+      newId = (await first("select public.replace_pending_message($1,'보강 안내 수정','33333333-3333-4333-8333-333333333333') as id", [originalId])).id;
+      assert.equal((await first('select content from messages where id=$1', [newId])).content, '보강 안내 수정');
+      assert.equal((await first('select status from message_deliveries where message_id=$1', [originalId])).status, 'cancelled');
+      assert.equal((await first('select status from message_deliveries where message_id=$1', [newId])).status, 'pending');
+    });
+    await db.query("update message_deliveries set status='failed' where message_id=$1", [newId]);
+    await actor('assistant-uid', async () => {
+      await assert.rejects(db.query("select public.replace_pending_message($1,'두 번째 수정','44444444-4444-4444-8444-444444444444')", [newId]), e => e.code === '23514');
+    });
+  });
   await test('manager deletes only unused locations while assistant and referenced locations are protected', async () => {
     const unused = await first("insert into locations(name) values ('UNUSED LOCATION') returning id");
     await actor('assistant-uid', async () => await denied(`select public.delete_managed_location(${unused.id})`));

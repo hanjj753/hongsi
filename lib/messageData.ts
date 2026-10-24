@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import { getSupabase } from './supabase';
 
 const pairingKey = 'hongsi-sms-device-pairing-v1';
@@ -48,7 +49,8 @@ export async function getThisSendingDeviceState(): Promise<{ id: string; label: 
 
 export async function getSendingDevices(): Promise<SendingDevice[]> {
   const { data, error } = await getSupabase().from('sending_devices')
-    .select('id,label,legacy_device_id,is_enabled,created_at').order('created_at', { ascending: false });
+    .select('id,label,legacy_device_id,is_enabled,created_at').is('archived_at', null)
+    .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
     id: String(row.id), label: String(row.label), androidId: String(row.legacy_device_id ?? ''),
@@ -68,6 +70,19 @@ export async function resetSendingDevice(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function archiveSendingDevice(id: string): Promise<void> {
+  const { error } = await getSupabase().rpc('archive_sending_device', { target_device_id: id });
+  if (error) throw error;
+}
+
+export async function replacePendingMessage(id: string, content: string): Promise<void> {
+  if (!content.trim()) throw new Error('메시지 내용을 입력해 주세요.');
+  const { error } = await getSupabase().rpc('replace_pending_message', {
+    target_message_id: id, new_content: content.trim(), new_request_id: Crypto.randomUUID(),
+  });
+  if (error) throw error;
+}
+
 export async function queueClassMessages(classId: string, sessionId: string | null, items: MessageDraft[],
   onProgress?: (processed: number, total: number, created: number) => void): Promise<number> {
   if (!items.length) throw new Error('메시지 대상이 없습니다.');
@@ -84,9 +99,17 @@ export async function queueClassMessages(classId: string, sessionId: string | nu
 }
 
 export async function getClassMessageQueue(classId: string): Promise<QueuedMessage[]> {
+  const { data: active, error: activeError } = await getSupabase().from('message_deliveries')
+    .select('message_id,message:messages!inner(class_id)')
+    .eq('message.class_id', classId)
+    .in('status', ['pending', 'sending', 'failed', 'unknown'])
+    .order('message_id', { ascending: false }).limit(500);
+  if (activeError) throw activeError;
+  const ids = [...new Set((active ?? []).map((row: any) => String(row.message_id)))].slice(0, 200);
+  if (!ids.length) return [];
   const { data, error } = await getSupabase().from('messages')
     .select('id,student_name_snapshot,content,created_at,message_deliveries(recipient_type,status,attempt_count,submitted_at,last_error)')
-    .eq('class_id', classId).order('created_at', { ascending: false }).limit(200);
+    .eq('class_id', classId).in('id', ids).order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((row: any) => ({
     id: String(row.id), studentName: String(row.student_name_snapshot), content: String(row.content),

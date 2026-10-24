@@ -5,7 +5,7 @@ import { getSupabaseClassStudents, type ClassStudent } from '../lib/classData';
 import {
   cancelPendingClassMessages, claimNextMessageDelivery, finishMessageDelivery,
   getClassMessageQueue, getClassPendingDeliveryCount, getLocalDevicePairing, getThisSendingDeviceState,
-  queueClassMessages, registerThisSendingDevice, type MessageDraft, type QueuedMessage,
+  queueClassMessages, registerThisSendingDevice, replacePendingMessage, type MessageDraft, type QueuedMessage,
 } from '../lib/messageData';
 import DirectSms from '../utils/smsSender';
 
@@ -41,6 +41,9 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [editingId, setEditingId] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(() => new Set());
   const prepared = useRef<{ fingerprint: string; items: MessageDraft[] } | null>(null);
 
   const load = useCallback(async () => {
@@ -65,7 +68,10 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     } catch { setDeviceState('invalid'); }
   }, []);
   useEffect(() => { void load(); void loadDevice(); }, [load, loadDevice]);
-  useEffect(() => { onDraftChange(Boolean(notice.trim())); }, [notice, onDraftChange]);
+  useEffect(() => {
+    const original = queue.find((item) => item.id === editingId)?.content ?? '';
+    onDraftChange(Boolean(notice.trim()) || Boolean(editingId && editContent !== original));
+  }, [notice, editingId, editContent, queue, onDraftChange]);
 
   const activeStudents = students.filter((student) => student.enrollmentStatus === 'active');
 
@@ -150,6 +156,18 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     finally { setBusy(false); }
   }
 
+  async function saveEdit() {
+    if (!editingId || !editContent.trim()) return;
+    setBusy(true); setError(''); setSuccess('');
+    try {
+      await replacePendingMessage(editingId, editContent);
+      setEditingId(''); setEditContent('');
+      setSuccess('대기 메시지를 수정했습니다. 기존 대기 건은 취소 처리되었습니다.');
+      await load();
+    } catch (cause: any) { setError(cause?.message || '대기 메시지를 수정하지 못했습니다.'); }
+    finally { setBusy(false); }
+  }
+
   return <View style={styles.panel}>
     <Text style={styles.title}>메시지</Text>
     <Text style={styles.description}>여기서는 수업 공지를 추가하고 문자 발송을 관리합니다. 차시별 개별 메시지는 해당 차시 화면에서 작성합니다. 학생별 기본 수신자에 따라 학부모만 또는 학생·학부모 모두에게 보냅니다.</Text>
@@ -171,13 +189,27 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
         </Pressable>
       </View>
       <View style={styles.section}>
-        <View style={styles.row}><Text style={styles.heading}>발송 대기 및 이력</Text>
+        <View style={styles.row}><Text style={styles.heading}>발송 대기 및 확인 필요</Text>
           <Pressable onPress={() => void load()}><Text style={styles.link}>새로고침</Text></Pressable></View>
-        <Text style={styles.description}>대기 수신자 {pendingCount}건 · 최근 메시지 최대 200건</Text>
-        {queue.length === 0 ? <Text style={styles.empty}>등록된 메시지가 없습니다.</Text> : queue.map((item) => <View key={item.id} style={styles.message}>
+        <Text style={styles.description}>대기 수신자 {pendingCount}건 · 발송 완료/취소된 메시지는 숨김 · 최대 200건</Text>
+        {queue.length === 0 ? <Text style={styles.empty}>대기 중이거나 확인이 필요한 메시지가 없습니다.</Text> : queue.map((item) => <View key={item.id} style={styles.message}>
           <Text style={styles.candidateName}>{item.studentName} · {koreaTime(item.createdAt)}</Text>
-          <Text style={styles.previewText}>{item.content}</Text>
+          <Text style={styles.previewText} numberOfLines={expandedMessages.has(item.id) ? undefined : 3}>{item.content}</Text>
+          <Pressable onPress={() => setExpandedMessages((current) => {
+            const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next;
+          })}><Text style={styles.link}>{expandedMessages.has(item.id) ? '접기' : '전체 보기'}</Text></Pressable>
           <Text style={styles.candidateDetail}>{item.deliveries.map((delivery) => `${delivery.recipientType === 'parent' ? '학부모' : '학생'}: ${statusLabels[delivery.status] || delivery.status}`).join(' · ')}</Text>
+          {item.deliveries.length > 0 && item.deliveries.every((delivery) => delivery.status === 'pending') && <>
+            <Pressable disabled={busy} onPress={() => { setEditingId(item.id); setEditContent(item.content); }}><Text style={styles.link}>메시지 수정</Text></Pressable>
+            {editingId === item.id && <View style={styles.editBox}>
+              <Text style={styles.candidateDetail}>아직 전송되지 않은 메시지만 수정할 수 있습니다.</Text>
+              <TextInput style={styles.input} multiline value={editContent} onChangeText={setEditContent} placeholder="수정할 메시지" placeholderTextColor="#9CA3AF" />
+              <View style={styles.editActions}>
+                <Pressable disabled={busy || !editContent.trim() || editContent.trim() === item.content} style={[styles.button, (busy || !editContent.trim() || editContent.trim() === item.content) && styles.disabled]} onPress={() => void saveEdit()}><Text style={styles.buttonText}>수정 저장</Text></Pressable>
+                <Pressable onPress={() => { setEditingId(''); setEditContent(''); }}><Text style={styles.link}>취소</Text></Pressable>
+              </View>
+            </View>}
+          </>}
         </View>)}
         {canManage && pendingCount > 0 && <Pressable disabled={busy} onPress={() => confirmAction('대기 메시지 취소', `이 수업의 대기 수신자 ${pendingCount}건을 취소할까요?`, () => void cancelPending())}>
           <Text style={styles.danger}>대기 메시지 전체 취소</Text>
@@ -187,6 +219,7 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
         <Text style={styles.heading}>Android 기기 문자 발송</Text>
         {Platform.OS !== 'android' ? <Text style={styles.description}>문자 발송과 기기 등록은 Android 앱에서 가능합니다.</Text> : <>
           <Text style={styles.description}>기기 상태: {deviceState === 'enabled' ? '발송 허용' : deviceState === 'pending' ? '매니저 승인 대기' : deviceState === 'invalid' ? '재등록 필요' : '미등록'}</Text>
+          {(deviceState === 'unregistered' || deviceState === 'invalid') && <Text style={styles.hint}>앱을 재설치하면 기기 등록 정보가 지워집니다. 이 기기를 다시 등록 요청한 뒤 매니저 승인을 받아 주세요.</Text>}
           {deviceState !== 'enabled' && <>
             <TextInput style={styles.deviceInput} value={deviceLabel} onChangeText={setDeviceLabel} placeholder="기기 이름" />
             <Pressable disabled={busy} style={[styles.button, busy && styles.disabled]} onPress={() => void registerDevice()}><Text style={styles.buttonText}>이 기기 등록 요청</Text></Pressable>
@@ -218,6 +251,8 @@ const styles = StyleSheet.create({
   candidateName: { color: '#111827', fontWeight: '700' }, candidateDetail: { color: '#6B7280', fontSize: 12, marginTop: 4 },
   previewText: { color: '#374151', marginTop: 6, lineHeight: 20 },
   message: { padding: 12, borderBottomWidth: 1, borderColor: '#E5E7EB' }, empty: { color: '#6B7280', marginTop: 10 },
+  editBox: { marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: '#F9FAFB' },
+  editActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   deviceInput: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, padding: 10, backgroundColor: '#F9FAFB' },
   progressCard: { marginTop: 12, padding: 11, borderRadius: 9, backgroundColor: '#EEF2FF' },
   progressLabel: { color: '#312E81', fontSize: 13, fontWeight: '700', marginBottom: 8 },

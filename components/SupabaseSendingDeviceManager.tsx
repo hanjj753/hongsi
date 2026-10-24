@@ -1,12 +1,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { getSendingDevices, resetSendingDevice, setSendingDeviceEnabled, type SendingDevice } from '../lib/messageData';
+import { archiveSendingDevice, getSendingDevices, resetSendingDevice, setSendingDeviceEnabled, type SendingDevice } from '../lib/messageData';
 
 function confirmReset(action: () => void) {
   if (Platform.OS === 'web') {
     if (window.confirm('이 기기의 발송 허용과 등록 정보를 초기화할까요? 기기에서 다시 등록해야 합니다.')) action();
   } else Alert.alert('기기 등록 초기화', '발송 허용을 해제하고 기기에서 다시 등록하도록 할까요?', [
     { text: '취소', style: 'cancel' }, { text: '초기화', onPress: action },
+  ]);
+}
+
+function confirmArchive(action: () => void) {
+  const message = '이 기기를 목록에서 삭제할까요? 발송 권한과 등록 정보가 해제됩니다. 기존 발송 기록은 보존됩니다.';
+  if (Platform.OS === 'web') {
+    if (window.confirm(message)) action();
+  } else Alert.alert('문자 발송 기기 삭제', message, [
+    { text: '취소', style: 'cancel' }, { text: '삭제', style: 'destructive', onPress: action },
   ]);
 }
 
@@ -20,10 +29,11 @@ export default function SupabaseSendingDeviceManager() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  async function change(item: SendingDevice, action: 'toggle' | 'reset') {
+  async function change(item: SendingDevice, action: 'toggle' | 'reset' | 'archive') {
     setBusyId(item.id); setError('');
     try {
-      if (action === 'reset') await resetSendingDevice(item.id);
+      if (action === 'archive') await archiveSendingDevice(item.id);
+      else if (action === 'reset') await resetSendingDevice(item.id);
       else await setSendingDeviceEnabled(item.id, !item.enabled);
       await load();
     } catch (cause: any) { setError(cause?.message || '기기 상태를 변경하지 못했습니다.'); }
@@ -43,6 +53,8 @@ export default function SupabaseSendingDeviceManager() {
         onPress={() => void change(item, 'toggle')}><Text style={styles.buttonText}>{item.enabled ? '차단' : '허용'}</Text></Pressable>
       <Pressable disabled={busyId === item.id} style={styles.resetButton}
         onPress={() => confirmReset(() => void change(item, 'reset'))}><Text style={styles.actionText}>재등록</Text></Pressable>
+      <Pressable disabled={busyId === item.id} style={styles.resetButton}
+        onPress={() => confirmArchive(() => void change(item, 'archive'))}><Text style={styles.deleteText}>삭제</Text></Pressable>
     </View>)}
   </View>;
 }
@@ -59,4 +71,5 @@ const styles = StyleSheet.create({
   button: { backgroundColor: '#4F46E5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   disableButton: { backgroundColor: '#6B7280' }, buttonText: { color: '#FFFFFF', fontWeight: '800' },
   resetButton: { paddingHorizontal: 8, paddingVertical: 8 }, actionText: { color: '#4F46E5', fontWeight: '800' },
+  deleteText: { color: '#B91C1C', fontWeight: '800' },
 });
