@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, PermissionsAndroid, Platform, Pressable, Styl
 import * as Crypto from 'expo-crypto';
 import { getSupabaseClassStudents, type ClassStudent } from '../lib/classData';
 import {
-  cancelPendingClassMessages, claimNextMessageDelivery, finishMessageDelivery,
+  cancelPendingClassMessages, cancelPendingMessage, claimNextMessageDelivery, finishMessageDelivery,
   getClassMessageQueue, getClassPendingDeliveryCount, getLocalDevicePairing, getThisSendingDeviceState,
   queueClassMessages, registerThisSendingDevice, replacePendingMessage, type MessageDraft, type QueuedMessage,
 } from '../lib/messageData';
@@ -70,7 +70,7 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
   }, []);
   useEffect(() => { void load(); void loadDevice(); }, [load, loadDevice]);
   useEffect(() => {
-    if (!queueToggleTouched) setQueueExpanded(queue.length < 5);
+    if (!queueToggleTouched) setQueueExpanded(queue.length < 20);
   }, [queue.length, queueToggleTouched]);
   useEffect(() => {
     const original = queue.find((item) => item.id === editingId)?.content ?? '';
@@ -160,6 +160,19 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
     finally { setBusy(false); }
   }
 
+  async function cancelOneMessage(id: string) {
+    setBusy(true); setError(''); setSuccess('');
+    try {
+      const count = await cancelPendingMessage(id);
+      if (editingId === id) { setEditingId(''); setEditContent(''); }
+      setSuccess(count > 0
+        ? `선택한 메시지의 대기 수신자 ${count}건을 취소했습니다.`
+        : '이미 전송 중이거나 처리된 메시지라 취소할 대기 수신자가 없습니다.');
+      await load();
+    } catch (cause: any) { setError(cause?.message || '대기 메시지를 취소하지 못했습니다.'); }
+    finally { setBusy(false); }
+  }
+
   async function saveEdit() {
     if (!editingId || !editContent.trim()) return;
     setBusy(true); setError(''); setSuccess('');
@@ -204,17 +217,22 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
           <Text style={styles.candidateName}>{item.studentName} · {koreaTime(item.createdAt)}</Text>
           <Text style={styles.previewText}>{item.content}</Text>
           <Text style={styles.candidateDetail}>{item.deliveries.map((delivery) => `${delivery.recipientType === 'parent' ? '학부모' : '학생'}: ${statusLabels[delivery.status] || delivery.status}`).join(' · ')}</Text>
-          {item.deliveries.length > 0 && item.deliveries.every((delivery) => delivery.status === 'pending') && <>
-            <Pressable disabled={busy} onPress={() => { setEditingId(item.id); setEditContent(item.content); }}><Text style={styles.link}>메시지 수정</Text></Pressable>
-            {editingId === item.id && <View style={styles.editBox}>
+          {item.deliveries.some((delivery) => delivery.status === 'pending') && <View style={styles.editActions}>
+            {item.deliveries.every((delivery) => delivery.status === 'pending') &&
+              <Pressable disabled={busy} onPress={() => { setEditingId(item.id); setEditContent(item.content); }}><Text style={styles.link}>메시지 수정</Text></Pressable>}
+            <Pressable disabled={busy} onPress={() => confirmAction('대기 메시지 취소', `${item.studentName} 학생의 대기 수신자만 취소할까요? 이미 전송 중이거나 제출된 수신자는 취소되지 않습니다.`, () => void cancelOneMessage(item.id))}>
+              <Text style={styles.danger}>이 메시지 취소</Text>
+            </Pressable>
+          </View>}
+          {editingId === item.id && item.deliveries.length > 0 && item.deliveries.every((delivery) => delivery.status === 'pending') &&
+            <View style={styles.editBox}>
               <Text style={styles.candidateDetail}>아직 전송되지 않은 메시지만 수정할 수 있습니다.</Text>
               <TextInput style={styles.input} multiline value={editContent} onChangeText={setEditContent} placeholder="수정할 메시지" placeholderTextColor="#9CA3AF" />
               <View style={styles.editActions}>
                 <Pressable disabled={busy || !editContent.trim() || editContent.trim() === item.content} style={[styles.button, (busy || !editContent.trim() || editContent.trim() === item.content) && styles.disabled]} onPress={() => void saveEdit()}><Text style={styles.buttonText}>수정 저장</Text></Pressable>
-                <Pressable onPress={() => { setEditingId(''); setEditContent(''); }}><Text style={styles.link}>취소</Text></Pressable>
+                <Pressable onPress={() => { setEditingId(''); setEditContent(''); }}><Text style={styles.link}>수정 닫기</Text></Pressable>
               </View>
             </View>}
-          </>}
         </View>)}
         {canManage && pendingCount > 0 && <Pressable disabled={busy} onPress={() => confirmAction('대기 메시지 취소', `이 수업의 대기 수신자 ${pendingCount}건을 취소할까요?`, () => void cancelPending())}>
           <Text style={styles.danger}>대기 메시지 전체 취소</Text>

@@ -2,7 +2,7 @@
 
 > 운영 현황: `hongsi-eta.vercel.app`은 `hongsi-dev` Supabase 프로젝트를 실제 데이터베이스로 사용한다. 화면의 개발 모드 문구는 제거했다. 이 프로젝트에 입력하는 내용은 운영 데이터다.
 
-작성: 2026-09-13 · 갱신: 2026-10-11 · 브랜치 `codex/migrate-to-supabase`
+작성: 2026-09-13 · 갱신: 2026-10-24 · 브랜치 `main`
 
 ## 적용 완료
 
@@ -35,7 +35,11 @@
 - 2026-09-19 Supabase Third-Party Auth 화면에서 Firebase 프로젝트 `hongsi-assistant` 연결의 **ENABLED** 상태를 확인했다. 이미 등록되어 있어 중복 생성하지 않았다.
 - `.env.local`에 개발 프로젝트 URL과 Publishable key를 설정했다. 비밀 키는 사용하지 않았으며 이 파일은 Git에서 제외된다. 다른 환경에서는 `.env.example`을 복사하고 공개 키를 채운다.
 
-적용된 SQL은 수정하지 않는다. SQL Editor 실행은 CLI의 migration history에 자동 등록되지 않으므로, CLI `db push`를 쓰기 전에 초기 21개와 아래 22·23번을 포함한 **23개 버전**의 적용 상태를 확인하고 `migration repair --status applied`로 이력을 동기화해야 한다. 같은 SQL을 다시 실행하지 않는다.
+적용된 SQL은 수정하지 않는다. SQL Editor 실행은 CLI의 migration history에 자동 등록되지 않으므로, CLI `db push`를 쓰기 전에 적용된 모든 버전(현재 26번까지)의 상태를 확인하고 `migration repair --status applied`로 이력을 동기화해야 한다. 같은 SQL을 다시 실행하지 않는다.
+
+## 2026-10-24 메시지 개별 취소
+
+`supabase/migrations/20261024002600_cancel_pending_message.sql`을 운영 사이트가 사용하는 `hongsi-dev` 프로젝트의 SQL Editor에서 실행하고 성공 결과를 확인했다. 이 RPC는 한 메시지에서 아직 `pending`인 수신자만 `cancelled`로 바꾸며, 다른 메시지와 이미 전송 중이거나 제출된 기록은 유지한다. 기존 메시지 데이터는 적용 시 변경하지 않는다. 권한 및 일부 수신자만 취소되는 경우는 로컬 PGlite 테스트에서 검증했다.
 
 ## 2026-10-11 DB 사용량 표시 및 수업별 근무 기록 추가
 

@@ -158,3 +158,9 @@ export async function cancelPendingClassMessages(classId: string): Promise<numbe
   return Number(data ?? 0);
 }
 
+export async function cancelPendingMessage(id: string): Promise<number> {
+  const { data, error } = await getSupabase().rpc('cancel_pending_message', { target_message_id: id });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+

@@ -665,6 +665,25 @@ try {
       await assert.rejects(db.query("select public.replace_pending_message($1,'두 번째 수정','44444444-4444-4444-8444-444444444444')", [newId]), e => e.code === '23514');
     });
   });
+  await test('individual message cancellation changes only pending recipients with class access', async () => {
+    const allowed = await first("insert into messages(class_id,student_id,session_id,student_name_snapshot,parent_phone_snapshot,student_phone_snapshot,content) values (1,1,1,'가상 학생','01012345678','01087654321','취소 대상') returning id");
+    await db.query("insert into message_deliveries(message_id,recipient_type) values ($1,'parent'),($1,'student')", [allowed.id]);
+    await db.query("update message_deliveries set status='submitted',submitted_at=now() where message_id=$1 and recipient_type='parent'", [allowed.id]);
+    await actor('assistant-uid', async () => {
+      assert.equal((await first('select public.cancel_pending_message($1) as count', [allowed.id])).count, 1);
+      assert.equal((await first('select public.cancel_pending_message($1) as count', [allowed.id])).count, 0);
+    });
+    assert.deepEqual((await db.query('select recipient_type,status from message_deliveries where message_id=$1 order by recipient_type', [allowed.id])).rows,
+      [{ recipient_type: 'parent', status: 'submitted' }, { recipient_type: 'student', status: 'cancelled' }]);
+
+    const restricted = await first("insert into messages(class_id,student_id,student_name_snapshot,parent_phone_snapshot,content) values (2,1,'가상 학생','01012345678','다른 수업') returning id");
+    await db.query("insert into message_deliveries(message_id,recipient_type) values ($1,'parent')", [restricted.id]);
+    await actor('assistant-uid', async () => await denied(`select public.cancel_pending_message(${restricted.id})`));
+    await actor('manager-uid', async () => {
+      assert.equal((await first('select public.cancel_pending_message($1) as count', [restricted.id])).count, 1);
+      await assert.rejects(db.query('select public.cancel_pending_message(-1)'), e => e.code === 'P0002');
+    });
+  });
   await test('manager deletes only unused locations while assistant and referenced locations are protected', async () => {
     const unused = await first("insert into locations(name) values ('UNUSED LOCATION') returning id");
     await actor('assistant-uid', async () => await denied(`select public.delete_managed_location(${unused.id})`));

@@ -328,13 +328,16 @@ export function TermClassManager({ onChanged }: Props) {
                 </View>
 
                 {termEditorOriginal !== undefined && (
-                  <View style={styles.editorStrip}>
-                    <TextInput style={styles.input} value={termDraft} onChangeText={setTermDraft} placeholder="예: 2026-3F" placeholderTextColor="#9CA3AF" editable={!saving} />
-                    <Pressable style={styles.smallMutedButton} onPress={() => setTermEditorOriginal(undefined)}><Text style={styles.smallMutedText}>취소</Text></Pressable>
-                    <Pressable disabled={saving} style={[styles.smallPrimaryButton, saving && styles.disabled]} onPress={() => void saveTerm()}>
-                      <Text style={styles.smallPrimaryText}>{termEditorOriginal ? '이름 저장' : '추가'}</Text>
-                    </Pressable>
-                  </View>
+                  <>
+                    <View style={styles.editorStrip}>
+                      <TextInput style={styles.input} value={termDraft} onChangeText={setTermDraft} placeholder="예: 2026-1M, 2026-2F, 2026-1V" placeholderTextColor="#9CA3AF" editable={!saving} />
+                      <Pressable style={styles.smallMutedButton} onPress={() => setTermEditorOriginal(undefined)}><Text style={styles.smallMutedText}>취소</Text></Pressable>
+                      <Pressable disabled={saving} style={[styles.smallPrimaryButton, saving && styles.disabled]} onPress={() => void saveTerm()}>
+                        <Text style={styles.smallPrimaryText}>{termEditorOriginal ? '이름 저장' : '추가'}</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.termCodeHelp}>1 = 1학기 · 2 = 2학기 · M = 중간고사 · F = 기말고사 · V = 방학특강{'\n'}1V = 여름방학 특강 · 2V = 겨울방학 특강</Text>
+                  </>
                 )}
 
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.termTabs}>
@@ -480,6 +483,7 @@ const styles = StyleSheet.create({
   outlineButton: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#C7D2FE' }, outlineButtonText: { color: '#4F46E5', fontWeight: '700' },
   primaryButton: { paddingHorizontal: 13, paddingVertical: 9, borderRadius: 8, backgroundColor: '#4F46E5' }, primaryButtonText: { color: '#FFFFFF', fontWeight: '800' },
   editorStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }, input: { minHeight: 43, flex: 1, paddingHorizontal: 11, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, backgroundColor: '#FFFFFF', color: '#111827' },
+  termCodeHelp: { marginBottom: 14, color: '#6B7280', fontSize: 12, lineHeight: 19 },
   smallMutedButton: { paddingHorizontal: 11, paddingVertical: 11, borderRadius: 8, backgroundColor: '#E5E7EB' }, smallMutedText: { color: '#374151', fontWeight: '700' },
   smallPrimaryButton: { paddingHorizontal: 13, paddingVertical: 11, borderRadius: 8, backgroundColor: '#4F46E5' }, smallPrimaryText: { color: '#FFFFFF', fontWeight: '800' },
   termTabs: { alignItems: 'center', gap: 8, paddingBottom: 15 }, termTab: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18, backgroundColor: '#F3F4F6' }, termTabActive: { backgroundColor: '#4F46E5' }, termTabText: { color: '#4B5563', fontWeight: '700' }, termTabTextActive: { color: '#FFFFFF' },
