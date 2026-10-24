@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
 // Simulates verified claims inside PostgreSQL; NOT a test of JWT signatures,
@@ -25,9 +25,12 @@ try {
       $$ select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;
     grant usage on schema public, auth to anon,authenticated;
     grant execute on function auth.jwt() to anon,authenticated;`);
-  for (const file of ['20260913000100_initial_schema.sql','20260913000200_firebase_access.sql','20260923000300_remove_class_code.sql','20260924000400_student_records_rpc.sql','20260924000500_preserve_existing_student_details.sql','20260925000600_bulk_records_and_student_validation.sql','20260925000700_class_catalog_and_session_items.sql','20260926000800_enrollment_moves_makeups_and_session_staff.sql','20260926000900_restrict_enrollment_reactivation.sql','20260926001000_link_makeup_sessions.sql','20260926001100_class_enrollment_session_management.sql','20261001001200_class_day_part.sql','20261001001300_test_result_formats.sql','20261001001400_staff_and_workflows.sql','20261001001500_work_label_weekdays.sql','20261002001600_staff_bank_and_class_work_summary.sql','20261008001700_bank_save_and_minute_work_duration.sql','20261008001800_message_workflows.sql','20261008001900_session_assigned_message_claims.sql','20261008002000_delete_unused_location.sql','20261009002100_clinic_weekday_schedule.sql','20261011002200_database_usage.sql','20261016002300_test_question_sheets.sql']) {
+  const migrationDir = new URL('../migrations/', import.meta.url);
+  for (const file of (await readdir(migrationDir)).filter((name) => /^\d+.*\.sql$/.test(name)).sort()) {
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
+  // The live development database may already have this permission change when migrations are replayed.
+  await db.exec(await readFile(new URL('../migrations/20261024002400_assistant_student_editor.sql', import.meta.url), 'utf8'));
   await db.exec(`
     insert into staff(id,full_name,email,firebase_uid,employment_status) values
       (1,'관리자','admin@example.invalid','admin-uid','active'),
@@ -196,9 +199,14 @@ try {
     await actor('admin-uid', async () => db.exec("select public.admin_set_access(4,'assistant','suspended')"));
     await actor('pending-uid', async () => assert.equal((await db.query('select * from students')).rows.length, 0));
   });
-  await test('manager can register and enroll a student atomically while assistant cannot', async () => {
+  await test('approved assistant can register and edit students while destructive enrollment actions stay managed', async () => {
     await actor('assistant-uid', async () => {
-      await denied("select public.register_student_and_enroll(2,null,'S2','새 학생','','01011112222','','parent','2026-09-01')");
+      const result = await first("select public.register_student_and_enroll(2,null,'SA','조교 등록 학생','','01011112222','','parent','2026-09-01') as id");
+      assert.ok(result.id);
+      await db.query("select public.update_student_and_enrollment(2,$1,'SA','조교 수정 학생','01099998888','01011112222','','both','2026-09-02')", [result.id]);
+      const edited = await first('select s.full_name,s.default_message_recipients,e.joined_on::text from students s join enrollments e on e.student_id=s.id where s.id=$1 and e.class_id=2', [result.id]);
+      assert.deepEqual(edited, { full_name: '조교 수정 학생', default_message_recipients: 'both', joined_on: '2026-09-02' });
+      await denied(`select public.delete_class_enrollment(2,${result.id})`);
     });
     await actor('manager-uid', async () => {
       const result = await first("select public.register_student_and_enroll(2,null,'S2','새 학생','01000001111','01011112222','','both','2026-09-01') as id");

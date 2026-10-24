@@ -37,7 +37,16 @@ export function AppAccessGate({ children }: React.PropsWithChildren) {
     }
   };
 
-  if (state === 'checking' || state === 'signed_out') {
+  if (state === 'signed_out') {
+    return <View style={styles.container}>
+      <Text style={styles.title}>로그아웃되었습니다.</Text>
+      <Pressable style={styles.primaryButton} onPress={() => router.replace('/')}>
+        <Text style={styles.primaryButtonText}>로그인 화면으로 이동</Text>
+      </Pressable>
+    </View>;
+  }
+
+  if (state === 'checking') {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#4F46E5" />

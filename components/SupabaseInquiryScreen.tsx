@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import { createInquiry, getInquiries, resolveInquiry, type Inquiry } from '../lib/inquiryData';
+import { AppGuide } from './AppGuide';
 
 function koreaDate(value: string) {
   return new Date(Date.parse(value) + 9 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
@@ -73,6 +74,7 @@ export default function SupabaseInquiryScreen() {
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}>
     <Text style={styles.title}>문의하기</Text>
     <Text style={styles.subtitle}>건의사항이나 궁금한 점을 남겨주세요.</Text>
+    <AppGuide />
     <View style={styles.card}>
       <Text style={styles.profile}>이름  {access?.full_name || '-'}</Text>
       <Text style={styles.label}>문의 내용</Text>

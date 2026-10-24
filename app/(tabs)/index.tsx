@@ -12,11 +12,10 @@ import AssistantFormModal, {
 
 // Firebase & Auth
 import auth from '@react-native-firebase/auth';
-import { signOut } from 'firebase/auth';
 import { webAuth } from '../../firebaseConfig';
 
 // Utils & Config
-import { getCurrentUserEmail } from '../../utils/currentUser';
+import { getCurrentUserEmail, signOutCurrentUser } from '../../utils/currentUser';
 import { fetchSheetData } from "../../utils/googleSheet_csv";
 import { CSV_URLS, ATTENDANCE_LOG_HEADERS, SHEET_NAMES, API_URLS, PERMISSION_HEADERS, ASSISTANT_HEADERS } from "../../config/sheetConfig";
 import { postSheetData } from "../../utils/sheetApi";
@@ -288,14 +287,8 @@ export default function HomeScreen() {
 
   const handleLogout = async () => {
     try {
-      if (Platform.OS === 'web') {
-        await signOut(webAuth);
-        window.location.href = '/';
-      } else {
-        await auth().signOut();
-        if (router.canDismiss()) router.dismissAll();
-        router.replace('/');
-      }
+      await signOutCurrentUser();
+      router.replace('/');
     } catch (error: any) {
       showAlert('로그아웃 실패', error.message);
     }

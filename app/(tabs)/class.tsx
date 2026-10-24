@@ -1,6 +1,6 @@
 // [수업] 탭
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking, TextInput, Alert } from "react-native";
+import { View, Text, Pressable, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Platform, Modal, Linking, TextInput, Alert, useWindowDimensions } from "react-native";
 import type { ViewStyle } from "react-native";
 import { useRouter } from 'expo-router';
 import FontAwesome5 from "@expo/vector-icons/FontAwesome5";
@@ -22,6 +22,8 @@ import { getOpenWorkLog, type WorkLog } from "../../lib/staffData";
 
 export default function ClassScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const compact = width < 720;
   const { access } = useAppAccess();
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -320,13 +322,13 @@ export default function ClassScreen() {
       <ScrollView contentContainerStyle={styles.container} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
 
         {/* 헤더 영역 */}
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow, compact && styles.headerRowCompact]}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <FontAwesome5 name="chalkboard" size={24} color="#333" />
             <Text style={styles.title}>수업 목록</Text>
           </View>
 
-          <View style={styles.headerActions}>
+          <View style={[styles.headerActions, compact && styles.headerActionsCompact]}>
             {isSupabaseDataSource && <AllStudentRecords />}
             {isSupabaseDataSource && (isAdmin || isManager) && <TermClassManager onChanged={load} />}
             <Pressable
@@ -513,6 +515,8 @@ const styles = StyleSheet.create({
 
   headerRow: { width: "92%", flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 12 },
   headerActions: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
+  headerRowCompact: { width: '100%', flexDirection: 'column', alignItems: 'stretch', gap: 12 },
+  headerActionsCompact: { justifyContent: 'flex-start' },
   title: { fontSize: 20, fontWeight: "800", color: "#111827" },
   errorBox: { width: '92%', backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
   errorText: { color: '#991B1B', marginBottom: 8 },

@@ -121,6 +121,8 @@ node --env-file=.env.local supabase/tools/verify-firebase-access.mjs --email 'ho
 
 `hongsi-dev` SQL Editor에서 `20261011002200_database_usage.sql`과 `20261016002300_test_question_sheets.sql`을 순서대로 실행했다. 두 쿼리 모두 `Success. No rows returned`였다. 사용량 함수는 현재 DB의 `pg_database_size(current_database())`를 반환한다. 오답표용 두 테이블은 RLS ON이고 익명 조회가 불가하다. 저장 RPC는 `authenticated`에만 실행 권한이 있다. 조회 쿼리는 [개발 DB SQL Editor](https://supabase.com/dashboard/project/xhyzngxwxeooffmcaxyl/sql/c590fd4a-414d-42d5-a70a-522c9781cce5)에 남아 있다.
 
+2026-10-24 `20261024002400_assistant_student_editor.sql`의 학생 등록·정보 수정 권한 변경을 같은 개발 DB에 적용했다. 승인된 조교도 학생을 등록하고 수정할 수 있지만 전반·퇴원·완전 삭제와 계정/계좌 권한은 변경하지 않았다. 기존 함수 본문과 데이터 행은 유지하고 세 함수의 권한 조건만 변경했으며 SQL Editor에서 적용 성공과 새 조건을 확인했다. 이 SQL은 다시 실행해도 이미 변경된 함수를 건너뛴다.
+
 앱의 차시 화면 맨 아래에서 시험을 선택해 객관식·서술형 문항 수와 학생별 오답을 기록한다. PDF 저장/인쇄는 웹의 인쇄 창에서 PDF 저장을 선택하거나 Android/iOS의 PDF 공유 창을 사용한다. 이 개발 DB SQL 실행만으로 운영 사이트의 데이터 소스가 바뀌지는 않는다. Vercel Production 환경변수는 배포 전에 대시보드에서 확인해야 한다.
 
 ## main 배포 전 데이터 확인

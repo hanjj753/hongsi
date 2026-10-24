@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -97,6 +98,9 @@ function displayPhone(value: string): string {
 
 export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
   const { access } = useAppAccess();
+  const { width } = useWindowDimensions();
+  const compact = width < 700;
+  const canEditStudents = Boolean(access);
   const canManage = access?.app_role === 'manager' || access?.app_role === 'admin';
   const initialJoinedOn = isValidDate(defaultJoinedOn ?? '') ? String(defaultJoinedOn) : todayYmd();
 
@@ -262,19 +266,33 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
     finally { setSaving(false); }
   };
 
+  const studentActions = (student: ClassStudent) => <>
+    {canEditStudents && <Pressable style={styles.editButton} onPress={() => openEdit(student)}>
+      <Text style={styles.editButtonText}>수정</Text>
+    </Pressable>}
+    {canManage && (student.enrollmentStatus === 'active' ? (
+      <Pressable style={styles.stopButton} onPress={() => openStatus(student, 'withdraw')}><Text style={styles.stopButtonText}>퇴원</Text></Pressable>
+    ) : student.enrollmentStatus === 'withdrawn' ? (
+      <Pressable style={styles.restartButton} onPress={() => openStatus(student, 'reactivate')}><Text style={styles.restartButtonText}>수강 재개</Text></Pressable>
+    ) : null)}
+    {canManage && <Pressable style={styles.deleteButton} onPress={() => deleteEnrollment(student)}>
+      <Text style={styles.deleteButtonText}>완전 삭제</Text>
+    </Pressable>}
+  </>;
+
   return (
     <View style={styles.card}>
-      <View style={styles.header}>
+      <View style={[styles.header, compact && styles.headerCompact]}>
         <View style={styles.headerText}>
           <Text style={styles.title}>수강 학생</Text>
           <Text style={styles.description}>학생 정보는 모든 수업에서 공통으로 사용되며, 여기에서 등록하거나 수정합니다.</Text>
         </View>
-        {canManage && (
-          <View style={styles.headerActions}>
-            <Pressable style={styles.transferButton} onPress={() => void openTransfer()}>
+        {canEditStudents && (
+          <View style={[styles.headerActions, compact && styles.headerActionsCompact]}>
+            {canManage && <Pressable style={styles.transferButton} onPress={() => void openTransfer()}>
               <Ionicons name="swap-horizontal-outline" size={17} color="#4338CA" />
               <Text style={styles.transferButtonText}>학생 전반</Text>
-            </Pressable>
+            </Pressable>}
             <Pressable style={styles.addButton} onPress={openNew}>
               <Ionicons name="person-add-outline" size={17} color="#FFFFFF" />
               <Text style={styles.addButtonText}>학생 등록</Text>
@@ -291,8 +309,20 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
       ) : students.length === 0 ? (
         <View style={styles.emptyBox}>
           <Text style={styles.emptyTitle}>등록된 학생이 없습니다.</Text>
-          <Text style={styles.emptyText}>{canManage ? '학생 등록 버튼으로 이 수업의 학생을 추가해 주세요.' : '매니저 또는 관리자가 학생을 등록할 수 있습니다.'}</Text>
+          <Text style={styles.emptyText}>학생 등록 버튼으로 이 수업의 학생을 추가해 주세요.</Text>
         </View>
+      ) : compact ? (
+        <View style={styles.mobileList}>{students.map((student) => <View key={student.id} style={styles.mobileStudent}>
+          <View style={styles.mobileStudentHeader}>
+            <Text style={styles.nameText}>{student.fullName} · {student.studentCode}</Text>
+            <Text style={styles.mobileStatus}>{student.enrollmentStatus === 'active' ? '수강 중' : student.enrollmentStatus === 'transferred' ? '전반' : '퇴원'}</Text>
+          </View>
+          <Text style={styles.mobileDetail}>학생 {displayPhone(student.studentPhone)} · 학부모 {displayPhone(student.parentPhone)}</Text>
+          <Text style={styles.mobileDetail}>수강 시작 {student.joinedOn || '-'} · 기본 수신 {student.defaultMessageRecipients === 'both' ? '학생+학부모' : '학부모'}</Text>
+          {!!student.email && <Text style={styles.mobileDetail}>{student.email}</Text>}
+          {!!student.transferredToClassName && <Text style={styles.mobileDetail}>전반 → {student.transferredToClassName}</Text>}
+          <View style={styles.mobileActions}>{studentActions(student)}</View>
+        </View>)}</View>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator>
           <View style={styles.table}>
@@ -328,21 +358,7 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
                   {student.endedOn ? <Text style={styles.statusDate}>{student.endedOn}까지</Text> : null}
                 </View>
                 <View style={[styles.cellView, styles.actionCell]}>
-                  {canManage && (
-                    <>
-                      <Pressable style={styles.editButton} onPress={() => openEdit(student)}>
-                        <Text style={styles.editButtonText}>수정</Text>
-                      </Pressable>
-                      {student.enrollmentStatus === 'active' ? (
-                        <Pressable style={styles.stopButton} onPress={() => openStatus(student, 'withdraw')}><Text style={styles.stopButtonText}>퇴원</Text></Pressable>
-                      ) : student.enrollmentStatus === 'withdrawn' ? (
-                        <Pressable style={styles.restartButton} onPress={() => openStatus(student, 'reactivate')}><Text style={styles.restartButtonText}>수강 재개</Text></Pressable>
-                      ) : null}
-                      <Pressable style={styles.deleteButton} onPress={() => deleteEnrollment(student)}>
-                        <Text style={styles.deleteButtonText}>완전 삭제</Text>
-                      </Pressable>
-                    </>
-                  )}
+                  {studentActions(student)}
                 </View>
               </View>
             ))}
@@ -476,10 +492,18 @@ export function ClassStudentManager({ classId, defaultJoinedOn }: Props) {
 const styles = StyleSheet.create({
   card: { marginTop: 18, padding: 18, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5E7EB' },
   header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  headerCompact: { flexDirection: 'column', alignItems: 'stretch' },
   headerText: { flex: 1 },
   title: { color: '#111827', fontSize: 18, fontWeight: '800' },
   description: { marginTop: 5, color: '#6B7280', fontSize: 13, lineHeight: 19 },
   headerActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 7 },
+  headerActionsCompact: { justifyContent: 'flex-start' },
+  mobileList: { gap: 10 },
+  mobileStudent: { padding: 13, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, backgroundColor: '#FFFFFF' },
+  mobileStudentHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  mobileStatus: { color: '#4338CA', fontWeight: '700', fontSize: 12 },
+  mobileDetail: { marginTop: 6, color: '#4B5563', fontSize: 12, lineHeight: 18 },
+  mobileActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 9 },
   addButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 10, backgroundColor: '#4F46E5' },
   addButtonText: { color: '#FFFFFF', fontWeight: '800' },
   transferButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 13, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#EEF2FF' },

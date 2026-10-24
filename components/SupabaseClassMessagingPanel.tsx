@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Picker } from './ReadablePicker';
 import * as Crypto from 'expo-crypto';
@@ -20,9 +20,10 @@ function confirmAction(title: string, message: string, action: () => void) {
   } else Alert.alert(title, message, [{ text: '취소', style: 'cancel' }, { text: '확인', onPress: action }]);
 }
 
-function describeTests(workspace: SessionWorkspace, studentId: string): string {
-  if (!workspace.tests.length) return '-';
-  return workspace.tests.map((item) => {
+function describeTests(workspace: SessionWorkspace, studentId: string, selectedTestIds: Set<string>): string {
+  const tests = workspace.tests.filter((item) => selectedTestIds.has(item.id));
+  if (!tests.length) return '-';
+  return tests.map((item) => {
     const result = item.results[studentId];
     if (!result) return `${item.title}: 미입력`;
     if (result.status === '결시') return `${item.title}: 결시`;
@@ -35,12 +36,13 @@ function describeTests(workspace: SessionWorkspace, studentId: string): string {
   }).join(', ');
 }
 
-function makeCandidates(workspace: SessionWorkspace): Candidate[] {
+function makeCandidates(workspace: SessionWorkspace, selectedHomeworkIds: Set<string>, selectedTestIds: Set<string>): Candidate[] {
   return workspace.students.filter((student) => student.participationType !== 'makeup')
     .map((student) => ({
       student, attendance: workspace.attendance[student.id]?.status || '-',
-      homework: workspace.homeworks.map((item) => `${item.title}: ${item.results[student.id]?.grade || '미입력'}`).join(', ') || '-',
-      test: describeTests(workspace, student.id),
+      homework: workspace.homeworks.filter((item) => selectedHomeworkIds.has(item.id))
+        .map((item) => `${item.title}: ${item.results[student.id]?.grade || '미입력'}`).join(', ') || '-',
+      test: describeTests(workspace, student.id, selectedTestIds),
     })).sort((a, b) => a.student.fullName.localeCompare(b.student.fullName, 'ko'));
 }
 
@@ -80,7 +82,9 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
   const [notice, setNotice] = useState('');
   const [template, setTemplate] = useState(defaultTemplate);
   const [sessionId, setSessionId] = useState('');
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [workspace, setWorkspace] = useState<SessionWorkspace | null>(null);
+  const [selectedHomeworkIds, setSelectedHomeworkIds] = useState<Set<string>>(new Set());
+  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deviceLabel, setDeviceLabel] = useState('홍시 문자 발송 기기');
   const [deviceState, setDeviceState] = useState<'unregistered' | 'pending' | 'enabled' | 'invalid'>('unregistered');
@@ -121,6 +125,8 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
   useEffect(() => { void load(); void loadDevice(); }, [load, loadDevice]);
 
   const activeStudents = students.filter((student) => student.enrollmentStatus === 'active');
+  const candidates = useMemo(() => workspace ? makeCandidates(workspace, selectedHomeworkIds, selectedTestIds) : [],
+    [workspace, selectedHomeworkIds, selectedTestIds]);
   const selectedCandidates = candidates.filter((item) => selected.has(item.student.id));
   const sessionNumber = sessions.find((item) => item.id === sessionId)?.number ?? 0;
 
@@ -165,8 +171,12 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
     setBusy(true); setError('');
     try {
       const workspace = await getSupabaseSessionWorkspace(classId, sessionId);
-      const next = makeCandidates(workspace);
-      setCandidates(next);
+      const homeworkIds = new Set(workspace.homeworks.map((item) => item.id));
+      const testIds = new Set(workspace.tests.map((item) => item.id));
+      const next = makeCandidates(workspace, homeworkIds, testIds);
+      setSelectedHomeworkIds(homeworkIds);
+      setSelectedTestIds(testIds);
+      setWorkspace(workspace);
       setSelected(new Set(next.filter((item) => eligible(item.student)).map((item) => item.student.id)));
     } catch (cause: any) { setError(cause?.message || '차시 기록을 불러오지 못했습니다.'); }
     finally { setBusy(false); }
@@ -182,7 +192,7 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
       if (items.some((item) => !item.content)) throw new Error('메시지 내용을 입력해 주세요.');
       const count = await queueItems(items, sessionId);
       setSuccess(`${count}명의 개별 메시지를 대기 목록에 추가했습니다.`);
-      setCandidates([]);
+      setWorkspace(null);
     } catch (cause: any) { setError(cause?.message || '개별 메시지를 추가하지 못했습니다.'); }
     finally { setBusy(false); setProgress(null); }
   }
@@ -254,14 +264,29 @@ export default function SupabaseClassMessagingPanel({ classId, classLabel, termL
       </View>
       <View style={styles.section}>
         <Text style={styles.heading}>차시별 개별 메시지 추가</Text>
-        <View style={styles.pickerBox}><Picker selectedValue={sessionId} onValueChange={(value) => { setSessionId(String(value)); setCandidates([]); }}>
+        <View style={styles.pickerBox}><Picker selectedValue={sessionId} onValueChange={(value) => { setSessionId(String(value)); setWorkspace(null); setSelected(new Set()); }}>
           {sessions.map((item) => <Picker.Item key={item.id} value={item.id} label={`${item.number}차시 · ${item.date}`} />)}
         </Picker></View>
         <TextInput style={[styles.input, styles.template]} multiline value={template} onChangeText={setTemplate} placeholder="메시지 템플릿" />
         <Text style={styles.hint}>{'변수: ${STUDENT_NAME}, ${CLASS_NAME}, ${QUARTER}, ${SESSION}, ${DAY}, ${ATTENDANCE}, ${HOMEWORK}, ${TEST}'}</Text>
+        <Text style={styles.hint}>이번 차시에서 포함할 숙제·시험을 아래에서 고르면 {'${HOMEWORK}'}와 {'${TEST}'}에 선택한 항목만 이름과 결과로 들어갑니다. 차시마다 다시 선택해 주세요.</Text>
         <Pressable disabled={busy || !sessionId} style={[styles.button, (busy || !sessionId) && styles.disabled]} onPress={() => void loadCandidates()}>
           <Text style={styles.buttonText}>대상과 기록 불러오기</Text>
         </Pressable>
+        {workspace && <>
+          <Text style={styles.subheading}>메시지에 포함할 숙제</Text>
+          {workspace.homeworks.length === 0 ? <Text style={styles.empty}>이 차시에 등록된 숙제가 없습니다.</Text> :
+            <View style={styles.itemChoices}>{workspace.homeworks.map((item) => <Pressable key={item.id} style={styles.itemChoice}
+              onPress={() => setSelectedHomeworkIds((current) => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })}>
+              <Text style={styles.choiceText}>{selectedHomeworkIds.has(item.id) ? '☑' : '☐'} {item.title}</Text>
+            </Pressable>)}</View>}
+          <Text style={styles.subheading}>메시지에 포함할 시험</Text>
+          {workspace.tests.length === 0 ? <Text style={styles.empty}>이 차시에 등록된 시험이 없습니다.</Text> :
+            <View style={styles.itemChoices}>{workspace.tests.map((item) => <Pressable key={item.id} style={styles.itemChoice}
+              onPress={() => setSelectedTestIds((current) => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })}>
+              <Text style={styles.choiceText}>{selectedTestIds.has(item.id) ? '☑' : '☐'} {item.title}{item.resultType === 'memo' ? ' · 결과형' : ' · 점수형'}</Text>
+            </Pressable>)}</View>}
+        </>}
         {candidates.length > 0 && <>
           <Pressable onPress={() => setSelected(new Set(candidates.filter((item) => eligible(item.student)).map((item) => item.student.id)))}>
             <Text style={styles.link}>발송 가능한 학생 전체 선택</Text>
@@ -322,6 +347,10 @@ const styles = StyleSheet.create({
   panel: { padding: 16, marginBottom: 16, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   title: { fontSize: 18, fontWeight: '800', color: '#111827' },
   heading: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  subheading: { fontSize: 13, fontWeight: '800', color: '#374151', marginTop: 14, marginBottom: 7 },
+  itemChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  itemChoice: { borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#F5F3FF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9 },
+  choiceText: { color: '#312E81', fontSize: 13, fontWeight: '700' },
   description: { marginTop: 6, marginBottom: 10, color: '#6B7280', lineHeight: 19, fontSize: 13 },
   section: { borderTopWidth: 1, borderColor: '#E5E7EB', paddingTop: 15, marginTop: 15 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
