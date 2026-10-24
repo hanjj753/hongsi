@@ -70,7 +70,7 @@ export default function SupabaseClassMessagingPanel({ classId, canManage, onDraf
   }, []);
   useEffect(() => { void load(); void loadDevice(); }, [load, loadDevice]);
   useEffect(() => {
-    if (!queueToggleTouched) setQueueExpanded(queue.length < 20);
+    if (!queueToggleTouched) setQueueExpanded(queue.length < 5);
   }, [queue.length, queueToggleTouched]);
   useEffect(() => {
     const original = queue.find((item) => item.id === editingId)?.content ?? '';
