@@ -147,7 +147,11 @@ public class ClassContactsModule extends ReactContextBaseJavaModule {
 
     private void createContact(String name, String phone, long groupId) throws Exception {
         ArrayList<ContentProviderOperation> ops = new ArrayList<>();
-        ops.add(ContentProviderOperation.newInsert(RawContacts.CONTENT_URI).build());
+        // Some Contacts providers crash when an insert operation has null ContentValues.
+        // Explicit null account fields create a local raw contact and keep values non-null.
+        ops.add(ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+                .withValue(RawContacts.ACCOUNT_NAME, null)
+                .withValue(RawContacts.ACCOUNT_TYPE, null).build());
         ops.add(ContentProviderOperation.newInsert(Data.CONTENT_URI)
                 .withValueBackReference(Data.RAW_CONTACT_ID, 0)
                 .withValue(Data.MIMETYPE, StructuredName.CONTENT_ITEM_TYPE)
