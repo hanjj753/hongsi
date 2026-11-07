@@ -32,8 +32,9 @@ try {
     grant execute on function auth.jwt() to anon,authenticated;`);
   const migrationDir = new URL('../migrations/', import.meta.url);
   const staffEmailLoginMigration = '20261025003000_staff_email_login.sql';
+  const transferHistoryMigration = '20261107003100_student_transfer_history.sql';
   for (const file of (await readdir(migrationDir)).filter((name) => /^\d+.*\.sql$/.test(name)).sort()) {
-    if (file === staffEmailLoginMigration) continue;
+    if (file === staffEmailLoginMigration || file === transferHistoryMigration) continue;
     await db.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   }
   // The live development database may already have this permission change when migrations are replayed.
@@ -850,6 +851,37 @@ try {
       assert.equal(linked.staff_id, '4');
       assert.equal(linked.access_status, 'approved');
     }, { email: 'changed@example.invalid' });
+  });
+  await test('transfer history upgrade preserves enrollments and backfills known transfers', async () => {
+    const enrollmentsBefore = (await db.query('select * from enrollments order by class_id,student_id')).rows;
+    const oldTransfers = (await db.query("select * from enrollments where enrollment_status='transferred'")).rows;
+    await db.exec(await readFile(new URL(`../migrations/${transferHistoryMigration}`, import.meta.url), 'utf8'));
+    assert.deepEqual((await db.query('select * from enrollments order by class_id,student_id')).rows, enrollmentsBefore);
+    assert.equal((await first('select count(*)::int n from student_transfers')).n, oldTransfers.length);
+    assert.equal((await first("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and relkind='r' and relrowsecurity")).n, 26);
+  });
+  await test('repeated transfers retain each move and preserve earlier attendance atomically', async () => {
+    await db.exec(`insert into classes(id,term_label,subject) values (9000,'TEST','전반A'),(9001,'TEST','전반B'),(9002,'TEST','전반C');
+      insert into students(id,student_code,full_name) values (9000,'MOVE9000','전반 테스트');
+      insert into enrollments(class_id,student_id,joined_on) values (9000,9000,'2026-10-01');
+      insert into class_sessions(id,class_id,session_number,session_date) values (9000,9000,1,'2026-10-02');
+      insert into student_session_records(session_id,class_id,student_id,attendance_status) values (9000,9000,9000,'출석');`);
+    await actor('admin-uid', async () => {
+      await db.exec("select transfer_student(9000,9001,9000,'2026-10-08'); select transfer_student(9001,9000,9000,'2026-10-15'); select transfer_student(9000,9002,9000,'2026-10-22');");
+      const moves = (await db.query('select source_class_id,target_class_id,source_joined_on::text,effective_on::text from student_transfers where student_id=9000 order by effective_on')).rows;
+      assert.deepEqual(moves.map((move) => [Number(move.source_class_id), Number(move.target_class_id), move.source_joined_on, move.effective_on]),
+        [[9000,9001,'2026-10-01','2026-10-08'],[9001,9000,'2026-10-08','2026-10-15'],[9000,9002,'2026-10-15','2026-10-22']]);
+      await assert.rejects(db.query("select transfer_student(9002,9001,9000,'2026-10-21')"));
+      assert.equal((await first('select count(*)::int n from student_transfers where student_id=9000')).n, 3);
+      assert.equal((await first('select attendance_status from student_session_records where student_id=9000')).attendance_status, '출석');
+      await denied('delete from student_transfers where student_id=9000');
+      await denied("insert into student_transfers(student_id,source_class_id,target_class_id,effective_on) values(9000,9002,9001,'2026-10-30')");
+    });
+    await actor('changed-uid', async () => assert.equal((await first('select count(*)::int n from student_transfers where student_id=9000')).n, 3), { email: 'changed@example.invalid' });
+    await actor('assistant-uid', async () => assert.equal((await first('select count(*)::int n from student_transfers')).n, 0));
+    await actor('inactive-uid', async () => assert.equal((await first('select count(*)::int n from student_transfers')).n, 0));
+    await db.exec('set role anon');
+    try { await denied('select * from student_transfers'); } finally { await db.exec('reset role'); }
   });
   console.log(`Completed ${passed} access tests. No live accounts or messages changed.`);
 } finally { await db.close(); }

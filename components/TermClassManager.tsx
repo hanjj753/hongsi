@@ -30,6 +30,7 @@ import {
   type ManagedLocation,
 } from '../lib/classData';
 import { getDatabaseUsageBytes, SUPABASE_FREE_DATABASE_LIMIT_BYTES } from '../lib/databaseUsage';
+import { compareClasses } from '../lib/classOrdering';
 
 type Props = { onChanged: () => Promise<void> | void };
 
@@ -125,7 +126,7 @@ export function TermClassManager({ onChanged }: Props) {
   const activeTerms = useMemo(() => terms.filter((item) => item.isActive), [terms]);
   const selectedClasses = useMemo(() => classes
     .filter((item) => item.termLabel === selectedTerm)
-    .sort((a, b) => Number(b.isActive) - Number(a.isActive) || Number(a.id) - Number(b.id)),
+    .sort(compareClasses),
   [classes, selectedTerm]);
 
   const refreshAll = async () => {

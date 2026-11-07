@@ -17,6 +17,7 @@ import {
 
 import { useAppAccess } from '../contexts/AppAccessContext';
 import { buildClassContacts, syncClassContacts } from '../lib/classContacts';
+import { StudentTransferHistory } from './StudentTransferHistory';
 import StudentBulkRegistration from './StudentBulkRegistration';
 import {
   deleteSupabaseClassEnrollment,
@@ -358,6 +359,7 @@ export function ClassStudentManager({ classId, defaultJoinedOn, termLabel, schoo
           <Text style={styles.mobileDetail}>수강 시작 {student.joinedOn || '-'} · 기본 수신 {student.defaultMessageRecipients === 'both' ? '학생+학부모' : '학부모'}</Text>
           {!!student.email && <Text style={styles.mobileDetail}>{student.email}</Text>}
           {!!student.transferredToClassName && <Text style={styles.mobileDetail}>전반 → {student.transferredToClassName}</Text>}
+          <StudentTransferHistory classId={classId} name={student.fullName} history={student.transferHistory} />
           <View style={styles.mobileActions}>{studentActions(student)}</View>
         </View>)}</View>
       ) : (
@@ -393,6 +395,7 @@ export function ClassStudentManager({ classId, defaultJoinedOn, termLabel, schoo
                       : student.enrollmentStatus === 'transferred' ? `전반${student.transferredToClassName ? ` → ${student.transferredToClassName}` : ''}` : '퇴원'}
                   </Text>
                   {student.endedOn ? <Text style={styles.statusDate}>{student.endedOn}까지</Text> : null}
+                  <StudentTransferHistory classId={classId} name={student.fullName} history={student.transferHistory} />
                 </View>
                 <View style={[styles.cellView, styles.actionCell]}>
                   {studentActions(student)}

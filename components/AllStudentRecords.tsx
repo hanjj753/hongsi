@@ -1,13 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 import {
   getSupabaseAllStudentOverviews,
   getSupabaseStudentRecordHistory,
+  getSupabaseRecordTerms,
   type StudentRecordHistory,
   type StudentOverview,
 } from '../lib/classData';
+import { Picker } from './ReadablePicker';
+import { TermAttendanceOverview } from './TermAttendanceOverview';
 
 const statusLabel = { active: '수강 중', transferred: '전반', withdrawn: '퇴원' } as const;
 
@@ -22,24 +25,36 @@ export function AllStudentRecords() {
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState('');
+  const [terms, setTerms] = useState<string[]>([]);
+  const [termFilter, setTermFilter] = useState('');
+  const [attendanceView, setAttendanceView] = useState(false);
 
   const filtered = useMemo(() => {
     const keyword = search.trim().toLocaleLowerCase('ko-KR');
-    return keyword ? students.filter((student) => `${student.fullName} ${student.studentCode}`.toLocaleLowerCase('ko-KR').includes(keyword)) : students;
-  }, [search, students]);
+    return students.filter((student) => (!termFilter || student.enrollments.some((item) => item.termLabel === termFilter))
+      && (!keyword || `${student.fullName} ${student.studentCode}`.toLocaleLowerCase('ko-KR').includes(keyword)));
+  }, [search, students, termFilter]);
+
+  useEffect(() => {
+    let active = true;
+    setHistory({ attendance: [], homeworks: [], tests: [] });
+    if (!visible || !selected) return;
+    setHistoryLoading(true); setError('');
+    getSupabaseStudentRecordHistory(selected.id, termFilter || undefined)
+      .then((result) => { if (active) setHistory(result); })
+      .catch((cause) => { if (active) setError(cause?.message || '기록을 불러오지 못했습니다.'); })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [selected?.id, termFilter, visible]);
 
   const open = async () => {
     setVisible(true); setLoading(true); setError(''); setSelected(null); setHistory({ attendance: [], homeworks: [], tests: [] });
-    try { setStudents(await getSupabaseAllStudentOverviews()); }
+    try {
+      const [overviews, labels] = await Promise.all([getSupabaseAllStudentOverviews(), getSupabaseRecordTerms()]);
+      setStudents(overviews); setTerms(labels);
+    }
     catch (loadError) { setError(loadError instanceof Error ? loadError.message : '학생 기록을 불러오지 못했습니다.'); }
     finally { setLoading(false); }
-  };
-
-  const selectStudent = async (student: StudentOverview) => {
-    setSelected(student); setHistoryLoading(true); setError('');
-    try { setHistory(await getSupabaseStudentRecordHistory(student.id)); }
-    catch (loadError) { setError(loadError instanceof Error ? loadError.message : '출석 기록을 불러오지 못했습니다.'); }
-    finally { setHistoryLoading(false); }
   };
 
   return (
@@ -52,17 +67,32 @@ export function AllStudentRecords() {
         <View style={styles.overlay}>
           <View style={styles.modal}>
             <View style={styles.header}>
-              <View><Text style={styles.title}>전체 학생 기록</Text><Text style={styles.subtitle}>수업·전반 이력과 모든 반의 출석을 한곳에서 확인합니다.</Text></View>
+              <View style={{ flex: 1 }}><Text style={styles.title}>{attendanceView ? '분기별 출석 현황' : '전체 학생 기록'}</Text><Text style={styles.subtitle}>수업·전반 이력과 모든 반의 출석을 한곳에서 확인합니다.</Text></View>
+              <Pressable style={styles.viewButton} onPress={() => {
+                if (!attendanceView && !termFilter) setTermFilter(terms[0] ?? '');
+                setAttendanceView((value) => !value);
+              }}><Text style={styles.openText}>{attendanceView ? '학생 기록' : '출석 현황'}</Text></Pressable>
               <Pressable accessibilityLabel="닫기" onPress={() => setVisible(false)}><Ionicons name="close" size={25} color="#4B5563" /></Pressable>
             </View>
             {!!error && <Text style={styles.error}>{error}</Text>}
+            <View style={styles.filters}>
+              <View style={styles.termPicker}><Picker selectedValue={termFilter} onValueChange={(value) => {
+                const term = String(value); setTermFilter(term);
+                if (selected && term && !selected.enrollments.some((item) => item.termLabel === term)) setSelected(null);
+              }}>
+                {!attendanceView && <Picker.Item label="전체 분기" value="" />}
+                {terms.map((term) => <Picker.Item key={term} label={term} value={term} />)}
+              </Picker></View>
+              <TextInput value={search} onChangeText={setSearch} style={[styles.search, { flex: 1, minWidth: 180 }]}
+                placeholder={attendanceView ? '수업·이름·전화번호 검색' : '이름 또는 학생 ID 검색'} placeholderTextColor="#9CA3AF" />
+            </View>
+            {attendanceView ? <TermAttendanceOverview termLabel={termFilter} search={search} /> : (
             <View style={[styles.body, narrow && styles.bodyNarrow]}>
               <View style={[styles.studentPane, narrow && styles.studentPaneNarrow]}>
-                <TextInput value={search} onChangeText={setSearch} style={styles.search} placeholder="이름 또는 학생 ID 검색" placeholderTextColor="#9CA3AF" />
                 {loading ? <ActivityIndicator style={styles.loader} color="#4F46E5" /> : (
                   <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
                     {filtered.map((student) => (
-                      <Pressable key={student.id} style={[styles.studentRow, selected?.id === student.id && styles.studentRowSelected]} onPress={() => void selectStudent(student)}>
+                      <Pressable key={student.id} style={[styles.studentRow, selected?.id === student.id && styles.studentRowSelected]} onPress={() => setSelected(student)}>
                         <Text style={styles.studentName}>{student.fullName}</Text><Text style={styles.studentCode}>{student.studentCode}</Text>
                       </Pressable>
                     ))}
@@ -75,12 +105,18 @@ export function AllStudentRecords() {
                   <>
                     <Text style={styles.detailTitle}>{selected.fullName} <Text style={styles.detailCode}>{selected.studentCode}</Text></Text>
                     <Text style={styles.sectionTitle}>수강 이력</Text>
-                    {selected.enrollments.map((item) => (
+                    {selected.enrollments.filter((item) => !termFilter || item.termLabel === termFilter).map((item) => (
                       <View key={`${item.classId}-${item.joinedOn}`} style={styles.historyCard}>
                         <View style={styles.historyTop}><Text style={styles.historyName}>{item.termLabel} · {item.className}</Text><Text style={styles.status}>{statusLabel[item.status]}</Text></View>
                         <Text style={styles.historyMeta}>{item.joinedOn || '시작일 없음'}{item.endedOn ? ` ~ ${item.endedOn}` : ' ~ 수강 중'}{item.transferredToClassName ? ` · ${item.transferredToClassName}(으)로 전반` : ''}</Text>
                       </View>
                     ))}
+                    <Text style={styles.sectionTitle}>전반 이력</Text>
+                    {selected.transfers.filter((item) => !termFilter || item.termLabel === termFilter).length === 0 ? <Text style={styles.empty}>전반 이력이 없습니다.</Text>
+                      : selected.transfers.filter((item) => !termFilter || item.termLabel === termFilter).map((item) => <View key={item.id} style={styles.historyCard}>
+                        <Text style={styles.historyName}>{item.sourceClassName} → {item.targetClassName}</Text>
+                        <Text style={styles.historyMeta}>{item.termLabel} · {item.effectiveOn} 전반</Text>
+                      </View>)}
                     <Text style={styles.sectionTitle}>출석 기록</Text>
                     {historyLoading ? <ActivityIndicator color="#4F46E5" /> : history.attendance.length === 0 ? <Text style={styles.empty}>저장된 출석 기록이 없습니다.</Text> : history.attendance.map((item) => (
                       <View key={`${item.sessionId}-${item.className}`} style={styles.attendanceRow}>
@@ -105,7 +141,7 @@ export function AllStudentRecords() {
                   </>
                 )}
               </ScrollView>
-            </View>
+            </View>)}
           </View>
         </View>
       </Modal>
@@ -117,8 +153,10 @@ const styles = StyleSheet.create({
   openButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#C7D2FE', backgroundColor: '#FFFFFF' },
   openText: { color: '#4F46E5', fontSize: 13, fontWeight: '800' },
   overlay: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 18, backgroundColor: 'rgba(17,24,39,0.55)' },
-  modal: { width: '100%', maxWidth: 1100, height: '86%', borderRadius: 18, overflow: 'hidden', backgroundColor: '#FFFFFF' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  modal: { width: '100%', maxWidth: 1500, height: '90%', borderRadius: 18, overflow: 'hidden', backgroundColor: '#FFFFFF' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 18, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  viewButton: { padding: 10, borderRadius: 8, backgroundColor: '#EEF2FF' }, filters: { padding: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  termPicker: { minWidth: 170, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, overflow: 'hidden' },
   title: { color: '#111827', fontSize: 19, fontWeight: '900' },
   subtitle: { marginTop: 4, color: '#6B7280', fontSize: 12 },
   error: { margin: 12, padding: 10, borderRadius: 8, color: '#B91C1C', backgroundColor: '#FEF2F2' },
