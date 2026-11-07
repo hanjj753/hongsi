@@ -4,7 +4,7 @@ import { compareClasses } from './classOrdering';
 type Row = Record<string, any>;
 export type AttendanceOverviewCell = { text: string; detail: string; transfer: boolean; makeup: boolean };
 export type AttendanceOverviewRow = {
-  key: string; className: string; fullName: string; studentPhone: string; parentPhone: string; email: string;
+  key: string; classId: string; className: string; fullName: string; studentPhone: string; parentPhone: string; email: string;
   cells: AttendanceOverviewCell[];
 };
 export type AttendanceOverview = { maxSession: number; rows: AttendanceOverviewRow[] };
