@@ -66,7 +66,7 @@ export function TermAttendanceOverview({ termLabel, search, loadAttendance = get
   const renderRow = ({ item, index: rowIndex }: { item: AttendanceOverviewRow; index: number }) => <View style={[styles.row, groups[rowIndex] % 2 === 1 && styles.alternateGroup,
     rowIndex > 0 && groups[rowIndex] !== groups[rowIndex - 1] && styles.groupStart]}>
     {[item.className, item.fullName, item.studentPhone || '-', item.parentPhone || '-', item.email || '-'].map((value, i) => (
-      <View key={i} style={[styles.cell, { width: widths[i] }]}><Text numberOfLines={1} style={styles.text}>{value}</Text></View>
+      <View key={i} style={[styles.cell, { width: widths[i] }]}><Text numberOfLines={1} style={[styles.text, i === 1 && item.isWithdrawn && styles.withdrawn]}>{value}</Text></View>
     ))}
     {item.cells.map((cell, index) => <Pressable key={index} style={[styles.cell, { width: widths[index + fixedHeaders.length] }, cell.transfer && styles.transferBg, cell.makeup && styles.makeupBg]}
       accessibilityRole="button"
@@ -74,13 +74,13 @@ export function TermAttendanceOverview({ termLabel, search, loadAttendance = get
       accessibilityHint="출석 상세 내역을 엽니다."
       onPress={() => setDetail({ title: `${item.fullName} · ${index + 1}차시`, text: `${termLabel} · ${item.className}\n출석: ${cell.text}\n${cell.detail}` })}>
       <Text style={[styles.text, styles.attendance, ['미입력', '—'].includes(cell.text) && styles.muted,
-        cell.transfer && styles.transfer, cell.makeup && styles.makeup, cell.text === '미등록' && styles.unregistered]}>{attendanceText(cell)}</Text>
+        cell.transfer && styles.transfer, cell.makeup && styles.makeup, cell.text === '미등록' && styles.unregistered, cell.text === '퇴원' && styles.withdrawn]}>{attendanceText(cell)}</Text>
     </Pressable>)}
   </View>;
   return <View style={styles.container}>
-    <View style={styles.summary}><Text style={styles.help}>{termLabel} · {rows.length}행 · 최대 {data.maxSession}차시</Text><Pressable onPress={() => setRevision((value) => value + 1)}><Text style={styles.retry}>새로고침</Text></Pressable></View>
-    <Text style={styles.help}><Text style={styles.transfer}>빨강 ↔ 전반</Text> · <Text style={styles.makeup}>파랑 * 보강/클리닉</Text> · <Text style={styles.unregistered}>보라 미등록</Text> · 출석 칸을 누르면 상세 내용을 확인합니다.</Text>
-    <Text style={styles.help}>미등록: 수강 기간 밖 · 미입력: 수강 중인 차시의 빈 출석 · —: 일정 또는 임시 참여가 없는 차시</Text>
+    <View style={styles.summary}><Text style={styles.help}>{termLabel} · {rows.length}명 · 최대 {data.maxSession}차시</Text><Pressable onPress={() => setRevision((value) => value + 1)}><Text style={styles.retry}>새로고침</Text></Pressable></View>
+    <Text style={styles.help}><Text style={styles.transfer}>빨강 ↔ 전반</Text> · <Text style={styles.makeup}>파랑 보강</Text> · <Text style={styles.unregistered}>초록 미등록</Text> · <Text style={styles.withdrawn}>보라 퇴원</Text> · 출석 칸을 누르면 상세 내용을 확인합니다.</Text>
+    <Text style={styles.help}>학생당 한 행 · 전반 전 출석은 현재 반에 합쳐 표시 · 보강은 원래 차시에만 표시 · 미입력: 빈 출석 · —: 해당 차시 일정 없음</Text>
     <ScrollView horizontal style={styles.horizontal} contentContainerStyle={styles.horizontalContent}>
       <View style={{ width: tableWidth, flex: 1 }}>
         <FlatList data={rows} keyExtractor={(row) => row.key} renderItem={renderRow} stickyHeaderIndices={[0]}
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
   alternateGroup: { backgroundColor: '#F8FAFC' }, groupStart: { borderTopWidth: 3, borderTopColor: '#64748B' },
   cell: { paddingHorizontal: 10, justifyContent: 'center', borderRightWidth: 1, borderRightColor: '#E2E8F0' }, text: { color: '#1F2937', fontSize: 12 },
   heading: { fontSize: 12, color: '#334155', fontWeight: '800' }, attendance: { textAlign: 'center' }, muted: { color: '#94A3B8' },
-  unregistered: { color: '#7E22CE', fontWeight: '800' },
+  unregistered: { color: '#15803D', fontWeight: '800' }, withdrawn: { color: '#7E22CE', fontWeight: '800' },
   transfer: { color: '#B91C1C', fontWeight: '800' }, makeup: { color: '#1D4ED8', fontWeight: '800' }, transferBg: { backgroundColor: '#FFF7F7' }, makeupBg: { backgroundColor: '#EFF6FF' },
   summary: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 }, help: { color: '#64748B', fontSize: 12, lineHeight: 18 },
   retry: { color: '#4F46E5', fontSize: 13, fontWeight: '800', padding: 5 }, empty: { padding: 24, color: '#64748B', textAlign: 'center' }, error: { color: '#B91C1C' },
