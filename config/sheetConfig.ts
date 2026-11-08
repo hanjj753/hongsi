@@ -1,39 +1,42 @@
+// 이전 Google Sheets 연동 코드의 호환성을 위해 설정 구조만 유지합니다.
+// 운영은 Supabase를 사용하며, 실제 시트/Apps Script 주소는 제거했습니다.
+
 // 구글 시트 READ를 할 때에는 CSV를 이용.
 export const CSV_URLS = {
 
     // 수업 생성 시트 - [웹/앱] / [수업 생성 시트] / [마스터 시트 생성용]
-    CLASSES : "REMOVED_PRIVATE_SHEET_URL",
+    CLASSES : "",
 
     // 조교 출석 시트 - [웹/앱] / [data] / [Data_Storage] / [조교_출석_현황]
-    ATTENDANCE_LOG : "REMOVED_PRIVATE_SHEET_URL",
+    ATTENDANCE_LOG : "",
 
     // 수업 일정 시트 - [웹/앱] / [data] / [Data_Storage] / [전체_수업_일정]
-    CLASS_SCHEDULES: "REMOVED_PRIVATE_SHEET_URL",
+    CLASS_SCHEDULES: "",
 
     // 수업 위치 시트 - [웹/앱] / [data] / [Data_Storage] / [수업_장소들]
-    POSITIONS : "REMOVED_PRIVATE_SHEET_URL",
+    POSITIONS : "",
 
     // 조교 정보 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보]
-    ASSISTANT_INFO : "REMOVED_PRIVATE_SHEET_URL",
+    ASSISTANT_INFO : "",
 
     // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [앱 권한 관리]
-    PERMISSIONS : "REMOVED_PRIVATE_SHEET_URL",
+    PERMISSIONS : "",
 
     // 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [문의 관리]
-    INQUIRY : "REMOVED_PRIVATE_SHEET_URL",
+    INQUIRY : "",
   };
 
 // 구글 시트 WRITE를 할 때에는 Google Apps Script 웹앱 URL을 이용.
 export const API_URLS = {
 
     // 조교 출석 시트 - [웹/앱] / [data] / [Data_Storage] / [조교_출석 현황]
-    ATTENDANCE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
+    ATTENDANCE_LOG : "",
 
     // 메시지 저장 시트 - [웹/앱] / [data] / [TEXT_Storage] / [메시지 log]
-    MESSAGE_LOG : "REMOVED_PRIVATE_SCRIPT_URL",
+    MESSAGE_LOG : "",
 
     // 조교 정보 시트 및 앱 권한 관리 시트 - [웹/앱] / [data] / [조교 관리 시트] / [조교 정보] & [앱 권한 관리] & [문의 관리]
-    ASSISTANT_MGMT : "REMOVED_PRIVATE_SCRIPT_URL",
+    ASSISTANT_MGMT : "",
 
 };
 

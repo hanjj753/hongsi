@@ -1,118 +1,74 @@
-# 김연주T 통합 웹/앱 개발
+# 홍시 · 수업 운영 도우미
 
-## 초기 세팅 (읽을 필요x, 기록용)
-1. 아래 명령어들을 친다.
-```bash
-npx create-expo-app icon-generator
-cd icon-generator
-```
-2. `npx expo prebuild --platform android` 명령어를 친다.
+수업과 학생 기록, 조교 업무를 한곳에서 관리하는 웹·모바일 앱입니다. **김연주T 과학** 수업 운영을 위해 만들어졌으며, Expo와 React Native를 기반으로 합니다.
 
-## 실행을 위한 순서
-1. 컴퓨터에 Node.js를 설치한다. (https://nodejs.org/ko/download) (아래 쪽의 msi 파일)
-2. 아래 명령어를 powershell을 열어 시행해본다.
-```bash
-node -v
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-npm -v
-```
-3. 아래 세 Extension을 Visual Studio Code에서 설치한다.
-- ES7+ React/Redux/React-Native snippets
-- Prettier - Code formatter
-- Expo Tools
-4. git clone 으로 소스코드를 받고 프로젝트 디렉토리로 이동한다.
-- git이 없으면 (https://git-scm.com/)에서 git을 설치한다.
+## 주요 기능
+
+- **수업 관리** — 분기·수업·차시 일정을 관리하고 학생의 수강 및 반 이동 이력을 확인합니다.
+- **학생 기록** — 출석, 숙제, 시험 결과와 보강 기록을 차시별로 입력하고 살펴봅니다.
+- **조교 업무** — 근무 일정과 출퇴근 기록을 관리하고 역할에 따라 접근 권한을 구분합니다.
+- **일정과 소통** — 달력에서 일정을 확인하고 문의와 문자 발송 업무를 관리합니다.
+
+## 기술 구성
+
+| 영역 | 기술 |
+| --- | --- |
+| 앱과 웹 | Expo, React Native, React, TypeScript, Expo Router |
+| 인증 | Firebase Authentication, Google 로그인 |
+| 데이터 | Supabase (PostgreSQL) |
+| 배포 | Expo Application Services (EAS), Vercel |
+
+## 시작하기
+
+Node.js와 npm이 필요합니다. Android 네이티브 빌드에는 JDK 17과 Android Studio 및 Android SDK가 추가로 필요합니다.
+
 ```bash
 git clone https://github.com/hanjj753/hongsi.git
-cd hongsi20222
+cd hongsi
+npm ci
 ```
-5. npm 명령어로 필요한 패키지를 자동으로 다운받는다.
+
+`.env.example`을 `.env.local`로 복사한 뒤 본인의 Supabase 프로젝트 URL과 Publishable key를 입력합니다. 기본 데이터 소스는 Supabase이며, Firebase 인증 연동과 데이터베이스 접근 권한도 준비되어 있어야 실제 데이터를 사용할 수 있습니다.
+
 ```bash
-npm install
-```
-6. npx expo start 명령어로 localhost를 열고 Expo Go 앱으로 들어간다.
-- DEPRECATED;;
+# 개발 서버
+npm start
 
-## APK 파일 굽기
-1. JDK 17 버전 설치 (https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html)
-2. Android Studio 설치 (https://developer.android.com/studio?hl=ko) 아래에 exe 파일
-- Android Studio를 설치 후 실행하면 아래 것들을 설치할 수 있음.
-- Android SDK, Android SDK Platform, Android Virtual Device 설치
-- 위의 파일들 모두 설치 후 Android Studio를 실행했을 때, [More Actions]에서 [SDK Manager]을 선택하고, [SDK Tools]에 들어가 [Show Package Details]를 누른 뒤, [Android SDK Build-Tools]에는 36.1.0, 35.0.0, 34.0.0을 모두 선택하고, NDK에는 26.1.10909125을 선택한 뒤 Apply를 눌러 설치한다.
-3. ANDROID_HOME, Path 환경 변수 설정.
-- ANDROID_HOME 에는 ```C:\Users\사용자명\AppData\Local\Android\Sdk```
-- Path 변수에는 ```C:\Users\사용자명\AppData\Local\Android\Sdk\platform-tools```
-4. 아래 명령어 실행하면 android/app/build/outputs/apk/release 아래에 apk 파일이 만들어짐.
+# 웹
+npm run web
+
+# 네이티브 개발 빌드
+npm run android
+npm run ios
+```
+
+네이티브 앱은 Firebase와 Google 로그인을 위한 네이티브 모듈을 사용하므로 별도의 개발 빌드와 플랫폼별 Firebase 설정이 필요합니다. iOS 네이티브 빌드에는 macOS 환경이 필요합니다.
+
+## 빌드
+
+EAS CLI와 프로젝트 접근 권한을 준비한 후 미리보기 빌드를 만들 수 있습니다.
+
 ```bash
-cd android
-./gradlew --stop
-./gradlew clean
-./gradlew assembleRelease
-```
-5. 만약 명령어 실패하면, 아래 프로세스를 따른다.
-```bash
-cd android
-./gradlew --stop
-./gradlew clean
-<코드 오류 수정>
-./gradlew assembleRelease
-```
-6. 만약 eas 를 쓴다면, git commit 후 ```eas build -p android --profile preview``` 명령어 사용.
-7. release SHA1 - 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
-
-## ios용 파일 굽기
-1. ```eas build --platform ios --profile preview``` 명령어 실행
-
-## 웹 화면 보기
-1. 아래 명령어를 실행
-```bash
-npx expo start --web
-```
-2. 끝내고 싶으면 ```Ctrl+C```
-
-## 앱 이름 변경
-1. app.json에서 {expo : {"name": ""}} 부분을 직접 변경
-2. android/app/src/main/res/values/strings.xml에서 <string name="app_name">에 있는 내용 변경
-
-## 아이콘 넣기
-- https://icons.expo.fyi/Index 사이트에서 아이콘 찾기
-- 아래 내용 추가
-```bash
-import { FontAwesome } from '@expo/vector-icons';
-<FontAwesome name="google" size={24} color="black" />
+eas build --platform android --profile preview
+eas build --platform ios --profile preview
 ```
 
-## 구글 시트 CSV 배포하기
-1. [파일] - [공유] - [웹에 게시]
-2. [링크] 탭에서 [전체 문서] 부분을 원하는 시트로 선택한다.
-3. 옆의 [웹 페이지] 를 [쉼표로 구분된 값(.csv)]로 변경한 뒤 [게시]를 누른다.
-4. 나오는 URL을 복사한다.
+## 프로젝트 구조
 
-## 구글 시트 Apps Script 배포하기
-1. [확장 프로그램] - [Apps Script] 로 들어간다.
-2. 다른 코드는 건드리지 않고 오른쪽 위의 [배포]-[새 배포]를 누른다.
-3. [유형 선택]에서 [웹 앱]을, [다음 사용자 버전으로 실행]: [나], [액세스할 수 있는 사용자]: [모든 사용자] 로 설정하고 배포한다.
-4. 나온 URL을 [수업 생성 시트]를 열어 추가해준다. 
-5. Apps Script의 코드에 변화가 있다면 [새 배포]를 해주어야 한다.
-
-### 구글 로그인 웹 클라이언트 ID
-- 804211566696-qm3a9b7la3suceoqpongn6hrnkr56qra.apps.googleusercontent.com (앱)
-- client_secret_804211566696-b1o5umsuod4jg1mfqmse44fegdfpp9hm.apps.googleusercontent.com.json 확인 (웹)
-
-### Firebase Admin SDK 비공개 키
-- hongsi-assistant-firebase-adminsdk-fbsvc-92b1c97e7d.json
-
-## 앱 아이콘 변경하기
-1. 아래 명령어로 임시 프로젝트를 만든다.
-```bash
-# 바탕화면이나 편한 곳에서
-npx create-expo-app icon-generator
-cd icon-generator
+```text
+app/                 화면과 라우팅
+components/          공통 UI 및 업무 화면
+config/              데이터 소스와 서비스 설정
+lib/                 데이터 조회 및 업무 로직
+supabase/            데이터베이스 마이그레이션과 검증 도구
+google_apps_script/  이전 Google Sheets 연동 스크립트 (현재 미사용)
+docs/                데이터베이스 및 운영 문서
 ```
-2. icon-generator/assets 폴더에 바꾸고 싶은 icon.png와 adaptive-icon.png를 덮어씌운다.
-3. 아래 명령어를 치고, android/app/src/main/res 폴더의 `mipmap-`로 시작하는 아래 5개 폴더를 복사한다. 
-```bash
-npx expo prebuild --platform android
-```
-- 폴더 : `mipmap-hdpi` `mipmap-mdpi` `mipmap-xhdpi` `mipmap-xxhdpi` `mipmap-xxxhdpi`
-4. 원래 프로젝트의 파일들을 교체한다.
+
+## 개발 문서
+
+- [데이터베이스 설계](docs/database-design.md)
+- [데이터베이스 설정](docs/database-setup.md)
+- [초기 데이터 입력](docs/manual-data-entry.md)
+
+서비스 계정 키와 비밀번호 같은 비밀값은 저장소에 커밋하거나 `EXPO_PUBLIC_` 환경 변수에 넣지 않습니다. `EXPO_PUBLIC_` 값은 앱에 포함되는 공개 설정입니다.

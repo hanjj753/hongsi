@@ -29,11 +29,20 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# Local settings and private notes
+.env
+.env.*
+!.env.example
+.private/
+client_secret_*.json
 
 # Firebase Admin SDK private keys (keep outside the repository when possible)
 *-firebase-adminsdk-*.json
 
 # typescript
 *.tsbuildinfo
+
+# Local release artifacts and operational manuals
+/배포용/
+*.apk
+*.aab

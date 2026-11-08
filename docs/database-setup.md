@@ -108,7 +108,7 @@ node --env-file=.env.local supabase/tools/verify-firebase-access.mjs --email 'ho
 - `utils/appAccess.ts`: 본인 접근 상태 조회와 관리자 전용 계정 승인 RPC 호출. Firebase UID/승인 여부는 DB가 결정한다.
 - `contexts/AppAccessContext.tsx`와 `components/AppAccessGate.tsx`: 개발 DB 모드에서 로그인 직후 승인 상태와 역할을 확인한다. 미등록·승인 대기·중지·비활성 계정은 업무 화면 대신 상태 안내를 본다.
 - `lib/classData.ts`: 수업 목록, 위치, 수업 상세·차시·수강생·차시 기록을 개발 DB에서 조회한다. 장소와 학생 정보, 숙제·시험 항목도 DB에 저장한다.
-- 운영 사이트는 `EXPO_PUBLIC_DATA_SOURCE=supabase`를 사용한다. 로컬에서 값이 없거나 `sheets`이면 기존 Sheets 화면 흐름을 사용한다.
+- 운영 사이트는 `EXPO_PUBLIC_DATA_SOURCE=supabase`를 사용한다. 로컬에서도 기본 데이터 소스는 Supabase다. 이전 Sheets 화면 코드는 남아 있지만 현재 사용하지 않으며, 실제 연결 주소는 공개 소스에서 제거했다.
 - Supabase 웹 로그인은 Google Drive 범위를 요청하거나 Sheets용 Google 액세스 토큰을 기다리지 않는다. 승인된 계정으로 진입한 홈 화면은 기존 조교·권한·출퇴근 시트를 읽지 않고 DB의 근무 현황을 표시한다.
 - 수업 상세에서 수강 학생을 등록·수정한다. 학생 ID를 비우면 `S`와 임의 영문·숫자로 자동 생성하며, 한국 휴대전화 번호와 이메일 형식을 앱과 DB 양쪽에서 검사한다.
 - 학생 ID는 분기와 무관하게 계속 유지된다. 수강 관계는 `수강 중/전반/퇴원`으로 관리하고, 같은 분기 전반 시 이전 반의 종료일과 새 반의 시작일을 한 트랜잭션으로 저장한다. 이전 차시 기록은 원래 반에 남는다.
