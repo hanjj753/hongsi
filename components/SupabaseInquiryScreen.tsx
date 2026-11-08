@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import { createInquiry, getInquiries, resolveInquiry, type Inquiry } from '../lib/inquiryData';
 import { AppGuide } from './AppGuide';
+import { Link } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 function koreaDate(value: string) {
   return new Date(Date.parse(value) + 9 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
@@ -27,6 +29,7 @@ export default function SupabaseInquiryScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [projectVisible, setProjectVisible] = useState(false);
 
   const load = useCallback(async () => {
     try { setError(''); setItems(await getInquiries()); }
@@ -70,9 +73,16 @@ export default function SupabaseInquiryScreen() {
     </View>;
   }
 
-  return <ScrollView contentContainerStyle={styles.container}
+  return <><ScrollView contentContainerStyle={styles.container}
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} />}>
-    <Text style={styles.title}>문의하기</Text>
+    <View style={styles.headerRow}>
+      <Text style={styles.title}>문의하기</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="코드 공개 · 개발 문의 안내 열기"
+        style={({ pressed }) => [styles.projectButton, pressed && styles.disabled]}
+        onPress={() => setProjectVisible(true)}>
+        <Text style={styles.projectButtonText}>코드 공개 · 개발 문의</Text>
+      </Pressable>
+    </View>
     <Text style={styles.subtitle}>건의사항이나 궁금한 점을 남겨주세요.</Text>
     <AppGuide />
     <View style={styles.card}>
@@ -98,12 +108,43 @@ export default function SupabaseInquiryScreen() {
         {managed.length === 0 ? <Text style={styles.empty}>내역이 없습니다.</Text> : managed.map((item) => renderItem(item, true))}
       </>}
     </>}
-  </ScrollView>;
+  </ScrollView>
+    <Modal visible={projectVisible} transparent animationType="fade" onRequestClose={() => setProjectVisible(false)}>
+      <View style={styles.projectOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} accessible={false} onPress={() => setProjectVisible(false)} />
+        <View style={styles.projectDialog} accessibilityViewIsModal onAccessibilityEscape={() => setProjectVisible(false)}>
+          <View style={styles.projectHeader}>
+            <Text style={styles.projectTitle}>코드 공개 · 개발 문의</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="코드 공개 · 개발 문의 안내 닫기"
+              style={styles.projectClose} onPress={() => setProjectVisible(false)}>
+              <Ionicons name="close" size={24} color="#374151" />
+            </Pressable>
+          </View>
+          <ScrollView style={styles.projectScroll} contentContainerStyle={styles.projectContent}>
+            <Text style={styles.projectBody}>
+              이 프로젝트의 소스 코드를 GitHub에 공개했습니다. 개선 사항이나 새로운 기능을 Pull Request(PR)로 보내주시면 확인 후 반영하겠습니다.
+            </Text>
+            <Link href="https://github.com/hanjj753/hongsi" target="_blank" rel="noopener noreferrer"
+              accessibilityLabel="GitHub 공개 저장소 열기" style={styles.projectLink}>
+              GitHub 저장소 보기 ↗
+            </Link>
+            <Text style={styles.projectBody}>코드와 관련된 문의는 아래 이메일로 보내주세요.</Text>
+            <Link href="mailto:hanjj7767@gmail.com" style={styles.emailLink}>
+              hanjj7767@gmail.com
+            </Link>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  </>;
 }
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 20, paddingBottom: 50, backgroundColor: '#F6F7FB' },
-  title: { fontSize: 22, fontWeight: '800', color: '#111827' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  title: { fontSize: 22, fontWeight: '800', color: '#111827', flexShrink: 0 },
+  projectButton: { flexShrink: 1, minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#EEF2FF' },
+  projectButtonText: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: '#4338CA', textAlign: 'center' },
   subtitle: { color: '#6B7280', marginTop: 5, marginBottom: 18 },
   card: { padding: 18, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   profile: { color: '#374151', fontWeight: '700', marginBottom: 16 },
@@ -123,4 +164,14 @@ const styles = StyleSheet.create({
   resolveButton: { backgroundColor: '#D1FAE5', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
   resolveText: { color: '#065F46', fontWeight: '800', fontSize: 12 },
   empty: { textAlign: 'center', color: '#6B7280', marginVertical: 16 },
+  projectOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: 'rgba(17, 24, 39, 0.45)' },
+  projectDialog: { width: '100%', maxWidth: 480, maxHeight: '85%', borderRadius: 16, backgroundColor: '#FFFFFF', overflow: 'hidden' },
+  projectHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 20, paddingRight: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  projectTitle: { flex: 1, fontSize: 16, lineHeight: 24, fontWeight: '800', color: '#111827' },
+  projectClose: { minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
+  projectScroll: { flexGrow: 0 },
+  projectContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
+  projectBody: { marginTop: 10, fontSize: 14, lineHeight: 22, color: '#4B5563' },
+  projectLink: { alignSelf: 'flex-start', marginTop: 12, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 8, backgroundColor: '#EEF2FF', color: '#4338CA', fontSize: 14, fontWeight: '700' },
+  emailLink: { alignSelf: 'flex-start', paddingVertical: 12, color: '#4338CA', fontSize: 14, textDecorationLine: 'underline' },
 });
