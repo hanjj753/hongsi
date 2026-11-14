@@ -4,6 +4,8 @@ import { Picker } from './ReadablePicker';
 import type { ClassStudent, SessionTest } from '../lib/classData';
 import { getQuestionSheet, parseWrongQuestionList, questionLabel, saveQuestionSheet } from '../lib/questionSheetData';
 import { buildQuestionSheetHtml, openPdfDocument } from '../lib/printDocuments';
+import QuestionScoreCalculator from './QuestionScoreCalculator';
+import type { QuestionScoreSnapshot } from '../lib/questionScoreCalculator';
 
 const questionCellWidth = 82;
 type Props = {
@@ -14,6 +16,8 @@ type Props = {
   tests: SessionTest[];
   students: ClassStudent[];
   onDirtyChange?: (dirty: boolean) => void;
+  onApplyScores?: (testId: string, maxScore: number, scores: Record<string, number>) => void;
+  scoresBusy?: boolean;
 };
 
 export type QuestionSheetHandle = { save: () => Promise<boolean> };
@@ -28,7 +32,7 @@ function sheetSnapshot(objectiveCount: number, essayCount: number, rows: Record<
     .map(([studentId, numbers]) => [studentId, [...numbers].sort((left, right) => left - right)]) });
 }
 
-const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function TestQuestionSheet({ classId, sessionId, sessionDate, classLabel, tests, students, onDirtyChange }, ref) {
+const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function TestQuestionSheet({ classId, sessionId, sessionDate, classLabel, tests, students, onDirtyChange, onApplyScores, scoresBusy }, ref) {
   const [testId, setTestId] = useState('');
   const [objectiveText, setObjectiveText] = useState('');
   const [essayText, setEssayText] = useState('');
@@ -44,6 +48,7 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [scoreSnapshot, setScoreSnapshot] = useState<QuestionScoreSnapshot | null>(null);
   const selectedTest = tests.find((item) => item.id === testId);
   const objectiveCount = Number(objectiveText);
   const essayCount = Number(essayText);
@@ -156,6 +161,19 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
 
   React.useImperativeHandle(ref, () => ({ save }));
 
+  function openCalculator() {
+    if (busy || loading || scoresBusy || loadedTestId !== testId || !validate() || !selectedTest) return;
+    if (selectedTest.resultType !== 'score' || selectedTest.maxScore === null) {
+      setError('점수형 시험에서만 점수를 계산할 수 있습니다.'); return;
+    }
+    setError(''); setNotice('');
+    setScoreSnapshot({ testId, title: selectedTest.title, maxScore: selectedTest.maxScore, objectiveCount, essayCount,
+      questionNotes: { ...questionNotes }, students: students.map((student) => ({
+        id: student.id, fullName: student.fullName, studentCode: student.studentCode,
+        wrongNumbers: Object.prototype.hasOwnProperty.call(rosterRows, student.id) ? [...rosterRows[student.id]] : null,
+      })) });
+  }
+
   async function print() {
     if (!validate() || !selectedTest) return;
     setBusy(true); setError('');
@@ -243,10 +261,19 @@ const TestQuestionSheet = React.forwardRef<QuestionSheetHandle, Props>(function 
         {!!notice && <Text style={styles.notice}>{notice}</Text>}
         <View style={styles.actions}>
           <Pressable disabled={saveDisabled} style={[styles.button, saveDisabled && styles.disabled]} onPress={() => void save()}><Text style={styles.buttonText}>{busy ? '처리 중...' : '오답표 저장'}</Text></Pressable>
+          {!!onApplyScores && <Pressable accessibilityRole="button" disabled={busy || loading || scoresBusy || !countsValid || loadedTestId !== testId || selectedTest?.resultType !== 'score'}
+            style={[styles.outlineButton, (busy || loading || scoresBusy || !countsValid || loadedTestId !== testId || selectedTest?.resultType !== 'score') && styles.disabled]} onPress={openCalculator}><Text style={styles.outlineText}>점수 계산기</Text></Pressable>}
           <Pressable disabled={busy || loading || !countsValid || loadedTestId !== testId} style={[styles.outlineButton, (busy || loading || !countsValid || loadedTestId !== testId) && styles.disabled]} onPress={() => void print()}><Text style={styles.outlineText}>PDF 저장 / 인쇄</Text></Pressable>
         </View>
+        {selectedTest?.resultType === 'memo' && <Text style={styles.help}>결과 메모형 시험은 점수 계산기를 사용하지 않습니다.</Text>}
       </>}
     </>}
+    {scoreSnapshot && <QuestionScoreCalculator snapshot={scoreSnapshot} busy={scoresBusy} onClose={() => setScoreSnapshot(null)} onApply={(scores) => {
+      if (!onApplyScores) return;
+      onApplyScores(scoreSnapshot.testId, scoreSnapshot.maxScore, scores);
+      setScoreSnapshot(null);
+      setNotice(`${Object.keys(scores).length}명의 시험 점수를 위 점수 입력칸에 반영했습니다. 차시의 전체 저장을 눌러 주세요.`);
+    }} />}
   </View>;
 });
 

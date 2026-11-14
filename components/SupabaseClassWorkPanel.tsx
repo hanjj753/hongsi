@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Picker } from './ReadablePicker';
 import { getSupabaseActiveStaff, type AssignableStaff } from '../lib/classData';
 import { useAppAccess } from '../contexts/AppAccessContext';
 import {
-  finishMyWorkShift, getClassWorkLogForEdit, getClassWorkSummary, getOpenWorkLog, saveManagedWorkLog, startMyWorkShift,
+  deleteManagedWorkLog, finishMyWorkShift, getClassWorkLogForEdit, getClassWorkSummary, getOpenWorkLog, saveManagedWorkLog, startMyWorkShift,
   type ClassWorkSummary, type WorkLog, type WorkLogDraft,
 } from '../lib/staffData';
 
@@ -24,6 +24,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
   classId: string; classLabel: string; defaultHourlyRateKrw: string;
 }) {
   const { access } = useAppAccess();
+  const canDeleteWork = access?.app_role === 'admin' || access?.app_role === 'manager';
   const [open, setOpen] = useState<WorkLog | null>(null);
   const [history, setHistory] = useState<ClassWorkSummary[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -122,6 +123,22 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
     } finally { setBusy(false); }
   }
 
+  function deleteWork(row: ClassWorkSummary) {
+    if (!canDeleteWork || busy) return;
+    const message = `${row.staffName} · ${row.workDate} · ${koreanTime(row.startedAt).time} 출근 기록을 삭제할까요?${row.endedAt ? '' : '\n현재 근무 중인 기록입니다. 삭제하면 해당 출근 상태도 해제됩니다.'}`;
+    const remove = async () => {
+      setBusy(true); setError(''); setNotice('');
+      try {
+        await deleteManagedWorkLog(row.id, classId);
+        await reload();
+        setNotice('근무 기록을 삭제했습니다.');
+      } catch (cause: any) { setError(cause?.message || '근무 기록을 삭제하지 못했습니다.'); }
+      finally { setBusy(false); }
+    };
+    if (Platform.OS === 'web') { if (window.confirm(message)) void remove(); }
+    else Alert.alert('근무 기록 삭제', message, [{ text: '취소', style: 'cancel' }, { text: '삭제', style: 'destructive', onPress: () => void remove() }]);
+  }
+
   return <View style={styles.card}>
     <View style={styles.topRow}>
       <Text style={styles.title}>출근 관리</Text>
@@ -147,7 +164,7 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
             <Text style={[styles.cell, styles.timeCell, styles.headerText]}>출근</Text>
             <Text style={[styles.cell, styles.timeCell, styles.headerText]}>퇴근</Text>
             <Text style={[styles.cell, styles.durationCell, styles.headerText]}>근무 시간</Text>
-            {access?.app_role === 'admin' && <Text style={[styles.cell, styles.actionCell, styles.headerText]}>관리</Text>}
+            {canDeleteWork && <Text style={[styles.cell, styles.actionCell, styles.headerText]}>관리</Text>}
           </View>
           {history.length === 0 && <Text style={styles.empty}>아직 출근 기록이 없습니다.</Text>}
           {history.map((row) => <View key={row.id} style={styles.tableRow}>
@@ -156,7 +173,10 @@ export default function SupabaseClassWorkPanel({ classId, classLabel, defaultHou
             <Text style={[styles.cell, styles.timeCell]}>{koreanTime(row.startedAt).time}</Text>
             <Text style={[styles.cell, styles.timeCell]}>{row.endedAt ? koreanTime(row.endedAt).time : '근무 중'}</Text>
             <Text style={[styles.cell, styles.durationCell]}>{durationLabel(row.durationMinutes)}</Text>
-            {access?.app_role === 'admin' && <Pressable disabled={busy} style={styles.actionCell} onPress={() => void openEditForm(row)}><Text style={styles.refresh}>수정</Text></Pressable>}
+            {canDeleteWork && <View style={styles.actionCell}>
+              {access?.app_role === 'admin' && <Pressable accessibilityRole="button" disabled={busy} onPress={() => void openEditForm(row)}><Text style={[styles.refresh, busy && styles.disabled]}>수정</Text></Pressable>}
+              <Pressable accessibilityRole="button" accessibilityLabel={`${row.staffName} ${row.workDate} 근무 기록 삭제`} disabled={busy} onPress={() => deleteWork(row)}><Text style={[styles.deleteText, busy && styles.disabled]}>삭제</Text></Pressable>
+            </View>}
           </View>)}
         </View>
       </ScrollView>
@@ -217,7 +237,8 @@ const styles = StyleSheet.create({
   tableHeader: { backgroundColor: '#F3F4F6' }, headerText: { fontWeight: '800', color: '#374151' },
   cell: { paddingHorizontal: 10, paddingVertical: 12, fontSize: 13, color: '#111827' },
   nameCell: { width: 130 }, dateCell: { width: 120 }, timeCell: { width: 100 }, durationCell: { width: 130 },
-  actionCell: { width: 80, paddingHorizontal: 10, paddingVertical: 12 },
+  actionCell: { width: 130, paddingHorizontal: 10, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 18 },
+  deleteText: { color: '#DC2626', fontWeight: '700', fontSize: 13 },
   empty: { padding: 14, color: '#6B7280' }, moreButton: { alignSelf: 'center', padding: 12 },
   error: { color: '#B91C1C', marginTop: 9 }, notice: { color: '#047857', marginTop: 9 },
   overlay: { flex: 1, backgroundColor: '#0007', justifyContent: 'center', alignItems: 'center', padding: 12 },

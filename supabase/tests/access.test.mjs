@@ -550,6 +550,19 @@ try {
       assert.equal((await first('select count(*)::int n from work_logs where id=$1', [shiftId])).n, 0);
     });
   });
+  await test('class-scoped shift deletion respects management permissions and the class filter', async () => {
+    const id = (await first("insert into work_logs(staff_id,class_id,work_label,started_at,ended_at) values (3,1,'삭제 테스트','2026-10-02 10:00+09','2026-10-02 11:00+09') returning id")).id;
+    const before = (await first('select count(*)::int n from work_logs')).n;
+    await actor('assistant-uid', async () => {
+      assert.equal((await db.query('delete from work_logs where id=$1 and class_id=1 returning id', [id])).rows.length, 0);
+    });
+    assert.equal((await first('select count(*)::int n from work_logs where id=$1', [id])).n, 1);
+    await actor('manager-uid', async () => {
+      assert.equal((await db.query('delete from work_logs where id=$1 and class_id=2 returning id', [id])).rows.length, 0);
+      assert.equal((await db.query('delete from work_logs where id=$1 and class_id=1 returning id', [id])).rows.length, 1);
+    });
+    assert.equal((await first('select count(*)::int n from work_logs')).n, before - 1);
+  });
   await test('all approved staff see class shift summaries without hourly rates', async () => {
     await db.exec("insert into work_logs(staff_id,class_id,work_label,started_at,ended_at,hourly_rate_krw) values (2,1,'TEST','2026-10-01 18:00+09','2026-10-01 20:00+09',20000)");
     await actor('assistant-uid', async () => {

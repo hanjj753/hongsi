@@ -223,7 +223,9 @@ export async function saveManagedWorkLog(id: string | null, draft: WorkLogDraft)
   if (error) throw error;
 }
 
-export async function deleteManagedWorkLog(id: string): Promise<void> {
-  const { error } = await getSupabase().from('work_logs').delete().eq('id', id).select('id').single();
+export async function deleteManagedWorkLog(id: string, classId?: string): Promise<void> {
+  let query = getSupabase().from('work_logs').delete().eq('id', id);
+  if (classId !== undefined) query = query.eq('class_id', classId);
+  const { error } = await query.select('id').single();
   if (error) throw error;
 }

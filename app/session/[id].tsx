@@ -23,6 +23,7 @@ import SessionMessagingComposer from '../../components/SessionMessagingComposer'
 import SessionQuickEntryGrid, { type QuickEntryRow } from '../../components/SessionQuickEntryGrid';
 import { useAppAccess } from '../../contexts/AppAccessContext';
 import type { QuickEntryColumn } from '../../lib/sessionQuickEntry';
+import { mergeCalculatedTestScores } from '../../lib/questionScoreCalculator';
 import {
   addSupabaseMakeupParticipant,
   addSupabaseClinicParticipant,
@@ -351,6 +352,23 @@ function SessionWorkspaceScreen() {
       ...draft,
       tests: { ...draft.tests, [testId]: { ...(draft.tests[testId] ?? { mode: 'blank', score: '', resultText: '', notes: '' }), ...patch } },
     }));
+  };
+
+  const applyCalculatedScores = (testId: string, maxScore: number, scores: Record<string, number>) => {
+    if (!workspace || busyKey || refreshing) throw new Error('다른 작업이 끝난 후 다시 반영해 주세요.');
+    const test = workspace.tests.find((item) => item.id === testId);
+    if (!test || test.resultType !== 'score' || test.maxScore === null || Math.round(test.maxScore * 100) !== Math.round(maxScore * 100)) {
+      throw new Error('시험 구성이 변경되었습니다. 계산기를 닫고 다시 열어 주세요.');
+    }
+    const roster = new Set(workspace.students.map((student) => student.id));
+    const entries = Object.entries(scores);
+    if (entries.length === 0 || entries.some(([studentId, score]) => !roster.has(studentId) || !drafts[studentId]
+      || !Number.isFinite(score) || score < 0 || score > maxScore)) {
+      throw new Error('반영할 학생이나 점수를 확인해 주세요.');
+    }
+    setDrafts((current) => mergeCalculatedTestScores(current, testId, scores));
+    setActionError('');
+    setNotice(`${entries.length}명의 ${test.title} 점수를 덮어썼습니다. 전체 저장을 눌러야 저장됩니다.`);
   };
 
   const commitQuickEntry = (studentId: string, column: QuickEntryColumn, value: string) => {
@@ -847,7 +865,8 @@ function SessionWorkspaceScreen() {
           </Pressable>
         )}
         <TestQuestionSheet ref={questionSheetRef} onDirtyChange={setQuestionSheetDirty} classId={classId} sessionId={sessionId} sessionDate={workspace.sessionDate}
-          classLabel={routeTitle || '수업'} tests={workspace.tests} students={workspace.students} />
+          classLabel={routeTitle || '수업'} tests={workspace.tests} students={workspace.students}
+          onApplyScores={applyCalculatedScores} scoresBusy={Boolean(busyKey) || refreshing} />
         <SessionMessagingComposer classId={classId} classLabel={routeTitle || '수업'}
           termLabel={firstParam(params.termLabel)} day={firstParam(params.day)} workspace={workspace}
           recordsDirty={hasDraftChanges || hasPendingHomework || hasPendingTest} onDraftChange={setMessageDirty} />
